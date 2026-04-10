@@ -1,0 +1,74 @@
+basePath: /
+definitions:
+  api.ScanRequest:
+    properties:
+      auth_config:
+        type: object
+      scan_profile:
+        type: string
+      scope:
+        items:
+          type: string
+        type: array
+      target_url:
+        type: string
+    type: object
+host: web-ingestion.apps.blj.wtf
+info:
+  contact: {}
+  description: Accepts web scan submission requests and queues them for analysis.
+  title: Web Security Pipeline — Ingestion API
+  version: "1.0"
+paths:
+  /health:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Health check
+      tags:
+      - system
+  /scan:
+    post:
+      consumes:
+      - application/json
+      description: Validates the request and publishes it to NATS for the coordinator
+        to pick up.
+      parameters:
+      - description: Scan request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/api.ScanRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: job_id
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Submit a web scan
+      tags:
+      - ingestion
+swagger: "2.0"

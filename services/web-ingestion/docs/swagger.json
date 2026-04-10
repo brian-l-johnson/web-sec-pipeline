@@ -1,0 +1,112 @@
+{
+    "swagger": "2.0",
+    "info": {
+        "description": "Accepts web scan submission requests and queues them for analysis.",
+        "title": "Web Security Pipeline — Ingestion API",
+        "contact": {},
+        "version": "1.0"
+    },
+    "host": "web-ingestion.apps.blj.wtf",
+    "basePath": "/",
+    "paths": {
+        "/health": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "system"
+                ],
+                "summary": "Health check",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/scan": {
+            "post": {
+                "description": "Validates the request and publishes it to NATS for the coordinator to pick up.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "ingestion"
+                ],
+                "summary": "Submit a web scan",
+                "parameters": [
+                    {
+                        "description": "Scan request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api.ScanRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "job_id",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "definitions": {
+        "api.ScanRequest": {
+            "type": "object",
+            "properties": {
+                "auth_config": {
+                    "type": "object"
+                },
+                "scan_profile": {
+                    "type": "string"
+                },
+                "scope": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "target_url": {
+                    "type": "string"
+                }
+            }
+        }
+    }
+}
