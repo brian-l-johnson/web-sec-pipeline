@@ -1,0 +1,212 @@
+basePath: /
+definitions:
+  api.FindingResponse:
+    properties:
+      cwe:
+        type: integer
+      description:
+        type: string
+      evidence:
+        type: string
+      id:
+        type: string
+      job_id:
+        type: string
+      severity:
+        type: string
+      template_id:
+        type: string
+      title:
+        type: string
+      tool:
+        type: string
+      url:
+        type: string
+    type: object
+  api.FindingsListResponse:
+    properties:
+      findings:
+        items:
+          $ref: '#/definitions/api.FindingResponse'
+        type: array
+      total:
+        type: integer
+    type: object
+  api.JobListResponse:
+    properties:
+      jobs:
+        items:
+          $ref: '#/definitions/api.JobResponse'
+        type: array
+      total:
+        type: integer
+    type: object
+  api.JobResponse:
+    properties:
+      completed_at:
+        type: string
+      crawl_status:
+        type: string
+      error:
+        type: string
+      har_path:
+        type: string
+      job_id:
+        type: string
+      nuclei_status:
+        type: string
+      scan_profile:
+        type: string
+      started_at:
+        type: string
+      status:
+        type: string
+      submitted_at:
+        type: string
+      target_url:
+        type: string
+      zap_status:
+        type: string
+    type: object
+host: web-coordinator.apps.blj.wtf
+info:
+  contact: {}
+  description: Tracks web scan jobs and serves findings.
+  title: Web Security Pipeline — Coordinator API
+  version: "1.0"
+paths:
+  /health:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Health check
+      tags:
+      - system
+  /jobs:
+    get:
+      parameters:
+      - description: Max results (default 20)
+        in: query
+        name: limit
+        type: integer
+      - description: Pagination offset
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.JobListResponse'
+      summary: List scan jobs
+      tags:
+      - jobs
+  /jobs/{id}:
+    get:
+      parameters:
+      - description: Job UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.JobResponse'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get a scan job by ID
+      tags:
+      - jobs
+  /jobs/{id}/findings:
+    get:
+      parameters:
+      - description: Job UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.FindingsListResponse'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: List findings for a scan job
+      tags:
+      - jobs
+  /jobs/{id}/retrigger:
+    post:
+      description: Resets a failed or complete job and re-runs the full scan pipeline.
+      parameters:
+      - description: Job UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Retrigger a scan job
+      tags:
+      - jobs
+swagger: "2.0"
