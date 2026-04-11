@@ -1,0 +1,42 @@
+---
+env:
+  contexts:
+    - name: "target"
+      urls:
+        - "${TARGET_URL}"
+      includePaths:
+        - "${TARGET_URL}.*"
+  parameters:
+    failOnError: false
+    failOnWarning: false
+    progressToStdout: true
+
+jobs:
+  - type: spider
+    name: "Spider target"
+    parameters:
+      context: "target"
+      url: "${TARGET_URL}"
+      maxDuration: 5          # minutes
+      maxDepth: 5
+      maxChildren: 50
+
+  - type: passiveScan-wait
+    name: "Wait for passive scan"
+    parameters:
+      maxDuration: 10         # minutes
+
+  - type: activeScan
+    name: "Active scan"
+    parameters:
+      context: "target"
+      policy: "Default Policy"
+      # Coordinator sets SCAN_PROFILE; skip active scan when it is "passive".
+      # The shell entrypoint removes this block for passive-only profiles.
+
+  - type: report
+    name: "JSON report"
+    parameters:
+      template: "traditional-json"
+      reportDir: "${OUTPUT_DIR}"
+      reportFile: "report.json"

@@ -1,0 +1,196 @@
+package pipeline
+
+import (
+	"bufio"
+	"context"
+	"encoding/json"
+	"fmt"
+	"log"
+	"os"
+	"strings"
+
+	"github.com/google/uuid"
+
+	"github.com/brian-l-johnson/web-sec-pipeline/services/web-coordinator/internal/store"
+)
+
+// ---------------------------------------------------------------------------
+// ZAP report parsing
+// ---------------------------------------------------------------------------
+
+// zapReport is the top-level structure of ZAP's traditional-json report.
+type zapReport struct {
+	Site []struct {
+		Alerts []struct {
+			Alert    string `json:"alert"`
+			RiskDesc string `json:"riskdesc"` // e.g. "High (Medium)"
+			Desc     string `json:"desc"`
+			CWEID    int    `json:"cweid"` // 0 when absent
+			Instances []struct {
+				URI      string `json:"uri"`
+				Evidence string `json:"evidence"`
+			} `json:"instances"`
+		} `json:"alerts"`
+	} `json:"site"`
+}
+
+// zapRiskToSeverity maps ZAP riskdesc prefixes to our severity values.
+func zapRiskToSeverity(riskdesc string) string {
+	prefix := strings.ToLower(strings.SplitN(riskdesc, " ", 2)[0])
+	switch prefix {
+	case "critical":
+		return "critical"
+	case "high":
+		return "high"
+	case "medium":
+		return "medium"
+	case "low":
+		return "low"
+	default:
+		return "info"
+	}
+}
+
+// parseAndStoreZAPFindings reads the ZAP JSON report from reportPath and
+// inserts one web_findings row per alert instance.
+func (o *Orchestrator) parseAndStoreZAPFindings(ctx context.Context, jobID uuid.UUID, reportPath string) error {
+	data, err := os.ReadFile(reportPath)
+	if err != nil {
+		return fmt.Errorf("read zap report: %w", err)
+	}
+
+	var report zapReport
+	if err := json.Unmarshal(data, &report); err != nil {
+		return fmt.Errorf("parse zap report json: %w", err)
+	}
+
+	count := 0
+	for _, site := range report.Site {
+		for _, alert := range site.Alerts {
+			severity := zapRiskToSeverity(alert.RiskDesc)
+			desc := strings.TrimSpace(alert.Desc)
+
+			for _, inst := range alert.Instances {
+				f := store.WebFinding{
+					ID:       uuid.New(),
+					JobID:    jobID,
+					Tool:     "zap",
+					Severity: severity,
+					Title:    alert.Alert,
+					URL:      inst.URI,
+				}
+				if desc != "" {
+					f.Description = &desc
+				}
+				if ev := strings.TrimSpace(inst.Evidence); ev != "" {
+					f.Evidence = &ev
+				}
+				if alert.CWEID != 0 {
+					cwe := alert.CWEID
+					f.CWE = &cwe
+				}
+
+				if err := o.store.InsertFinding(ctx, f); err != nil {
+					log.Printf("orchestrator: insert zap finding failed (job=%s url=%s): %v", jobID, inst.URI, err)
+				} else {
+					count++
+				}
+			}
+		}
+	}
+	log.Printf("orchestrator: stored %d ZAP findings for job %s", count, jobID)
+	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Nuclei report parsing
+// ---------------------------------------------------------------------------
+
+// nucleiResult represents one line of Nuclei's JSONL output.
+type nucleiResult struct {
+	TemplateID string `json:"template-id"`
+	Info       struct {
+		Name        string `json:"name"`
+		Severity    string `json:"severity"`
+		Description string `json:"description"`
+		Classification struct {
+			CWEID []string `json:"cwe-id"` // e.g. ["CWE-79"]
+		} `json:"classification"`
+	} `json:"info"`
+	MatchedAt string `json:"matched-at"`
+}
+
+// parseCWE extracts the first integer CWE ID from strings like "CWE-79".
+func parseCWE(ids []string) *int {
+	for _, s := range ids {
+		var n int
+		if _, err := fmt.Sscanf(strings.ToUpper(strings.TrimPrefix(s, "CWE-")), "%d", &n); err == nil && n > 0 {
+			return &n
+		}
+	}
+	return nil
+}
+
+// nucleiSeverityNorm normalises Nuclei severity to our enum values.
+func nucleiSeverityNorm(s string) string {
+	switch strings.ToLower(s) {
+	case "critical":
+		return "critical"
+	case "high":
+		return "high"
+	case "medium":
+		return "medium"
+	case "low":
+		return "low"
+	default:
+		return "info"
+	}
+}
+
+// parseAndStoreNucleiFindings reads Nuclei's JSONL output and inserts findings.
+func (o *Orchestrator) parseAndStoreNucleiFindings(ctx context.Context, jobID uuid.UUID, reportPath string) error {
+	f, err := os.Open(reportPath)
+	if err != nil {
+		return fmt.Errorf("open nuclei report: %w", err)
+	}
+	defer f.Close()
+
+	count := 0
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		var result nucleiResult
+		if err := json.Unmarshal([]byte(line), &result); err != nil {
+			log.Printf("orchestrator: skip malformed nuclei line (job=%s): %v", jobID, err)
+			continue
+		}
+
+		finding := store.WebFinding{
+			ID:         uuid.New(),
+			JobID:      jobID,
+			Tool:       "nuclei",
+			Severity:   nucleiSeverityNorm(result.Info.Severity),
+			Title:      result.Info.Name,
+			URL:        result.MatchedAt,
+			TemplateID: &result.TemplateID,
+			CWE:        parseCWE(result.Info.Classification.CWEID),
+		}
+		if desc := strings.TrimSpace(result.Info.Description); desc != "" {
+			finding.Description = &desc
+		}
+
+		if err := o.store.InsertFinding(ctx, finding); err != nil {
+			log.Printf("orchestrator: insert nuclei finding failed (job=%s url=%s): %v", jobID, result.MatchedAt, err)
+		} else {
+			count++
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("scan nuclei report: %w", err)
+	}
+	log.Printf("orchestrator: stored %d Nuclei findings for job %s", count, jobID)
+	return nil
+}

@@ -117,9 +117,18 @@ func (o *Orchestrator) OnJobComplete(jobID uuid.UUID, tool string) {
 		}
 		o.launchScanners(ctx, jobID)
 
-	case "zap", "nuclei":
-		// Report parsing added in Phase 5 / Phase 6.
-		// For now just check whether both scanners are done.
+	case "zap":
+		reportPath := fmt.Sprintf("%s/output/%s/zap/report.json", o.dataDir, jobID)
+		if err := o.parseAndStoreZAPFindings(ctx, jobID, reportPath); err != nil {
+			log.Printf("orchestrator: zap findings parse error (job=%s): %v", jobID, err)
+		}
+		o.checkAndCompleteJob(ctx, jobID)
+
+	case "nuclei":
+		reportPath := fmt.Sprintf("%s/output/%s/nuclei/nuclei.jsonl", o.dataDir, jobID)
+		if err := o.parseAndStoreNucleiFindings(ctx, jobID, reportPath); err != nil {
+			log.Printf("orchestrator: nuclei findings parse error (job=%s): %v", jobID, err)
+		}
 		o.checkAndCompleteJob(ctx, jobID)
 	}
 }
