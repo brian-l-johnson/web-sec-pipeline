@@ -1,0 +1,56 @@
+name: Build web-coordinator image
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "services/web-coordinator/**"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache-dependency-path: services/web-coordinator/go.sum
+
+      - name: Install swag
+        run: go install github.com/swaggo/swag/cmd/swag@latest
+
+      - name: Generate swagger docs
+        working-directory: services/web-coordinator
+        run: swag init -g cmd/server/main.go --output docs
+
+      - name: Run tests
+        working-directory: services/web-coordinator
+        run: go test ./...
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: services/web-coordinator/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/brian-l-johnson/web-coordinator:${{ github.sha }}
+            ghcr.io/brian-l-johnson/web-coordinator:latest
