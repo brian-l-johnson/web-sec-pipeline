@@ -56,11 +56,11 @@ cd services/web-coordinator && golangci-lint run
 
 ## Docker — Services
 
-Build from the **repo root**:
+Build using the service directory as the context (Dockerfiles reference `go.mod`, `migrations/`, etc. at the context root):
 
 ```bash
-docker build -f services/web-ingestion/Dockerfile -t web-ingestion:dev .
-docker build -f services/web-coordinator/Dockerfile -t web-coordinator:dev .
+docker build -f services/web-ingestion/Dockerfile  -t web-ingestion:dev  services/web-ingestion/
+docker build -f services/web-coordinator/Dockerfile -t web-coordinator:dev services/web-coordinator/
 ```
 
 ## Docker — Tool Wrapper Images

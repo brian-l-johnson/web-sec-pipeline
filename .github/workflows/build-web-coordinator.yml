@@ -49,7 +49,7 @@ jobs:
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
-          context: .
+          context: services/web-coordinator
           file: services/web-coordinator/Dockerfile
           push: true
           tags: |
