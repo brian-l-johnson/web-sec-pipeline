@@ -8,14 +8,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY har_dump.py crawl.py ./
 
-# Create a non-root user (UID 1000) for k8s securityContext compatibility.
+# The Playwright base image ships with pwuser at UID/GID 1000.
 # mitmproxy writes its CA cert to $HOME/.mitmproxy on first run.
-RUN groupadd -g 1000 scanner \
- && useradd -m -u 1000 -g 1000 -d /home/scanner scanner \
- && mkdir -p /home/scanner/.mitmproxy \
- && chown -R 1000:1000 /home/scanner
+RUN mkdir -p /home/pwuser/.mitmproxy \
+ && chown -R 1000:1000 /home/pwuser/.mitmproxy
 
-ENV HOME=/home/scanner
+ENV HOME=/home/pwuser
 
 USER 1000
 
