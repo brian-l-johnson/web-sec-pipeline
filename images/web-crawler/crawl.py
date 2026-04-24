@@ -161,16 +161,25 @@ def crawl(page, target_url: str, scope: list, max_urls: int, max_depth: int, tim
         visited.add(url)
         log.info(f"[{len(visited)}/{max_urls}] depth={depth}  {url}")
 
-        try:
-            page.goto(url, timeout=20_000, wait_until="domcontentloaded")
-            # Wait for XHR to settle, but don't block forever on slow SPAs.
-            page.wait_for_load_state("networkidle", timeout=8_000)
-        except PlaywrightTimeout:
-            log.warning(f"Timeout loading {url}")
-            continue
-        except Exception as exc:
-            log.warning(f"Error loading {url}: {exc}")
-            continue
+        # Retry transient network errors (e.g. ERR_NETWORK_CHANGED while the
+        # mitmproxy SSL interception layer finishes initialising).
+        for attempt in range(3):
+            try:
+                page.goto(url, timeout=20_000, wait_until="domcontentloaded")
+                # Wait for XHR to settle, but don't block forever on slow SPAs.
+                page.wait_for_load_state("networkidle", timeout=8_000)
+                break  # success
+            except PlaywrightTimeout:
+                log.warning(f"Timeout loading {url}")
+                break  # don't retry timeouts
+            except Exception as exc:
+                err_str = str(exc)
+                if attempt < 2 and "ERR_NETWORK_CHANGED" in err_str:
+                    log.info(f"Transient network error on {url}, retrying ({attempt+1}/2)…")
+                    time.sleep(1.5)
+                else:
+                    log.warning(f"Error loading {url}: {exc}")
+                    break
 
         if depth >= max_depth:
             continue
@@ -204,7 +213,7 @@ def crawl(page, target_url: str, scope: list, max_urls: int, max_depth: int, tim
         except Exception:
             pass
 
-    remaining = time.monotonic() - deadline
+    remaining = deadline - time.monotonic()
     if remaining > 0:
         log.info(f"Crawl finished with {remaining:.0f}s remaining")
     else:
@@ -275,6 +284,10 @@ def main() -> int:
         mitm_proc.kill()
         return 1
     log.info("mitmproxy ready")
+    # Give mitmproxy a moment to fully initialise its SSL interception layer.
+    # The port accepts connections immediately but the first CONNECT requests
+    # can fail with ERR_NETWORK_CHANGED if the CA cert isn't ready yet.
+    time.sleep(1.5)
 
     # ------------------------------------------------------------------
     # Playwright crawl
