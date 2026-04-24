@@ -13,6 +13,10 @@ RUN python3 -m venv /opt/mitm-venv \
  && /opt/mitm-venv/bin/pip install --no-cache-dir "mitmproxy>=10.4,<12" \
  && ln -sf /opt/mitm-venv/bin/mitmdump /usr/local/bin/mitmdump
 
+# Smoke-test: fail the build immediately if playwright can't be imported.
+# This catches cases where the base image or a prior pip step broke the install.
+RUN python3 -c "from playwright.sync_api import sync_playwright; print('playwright ok')"
+
 COPY har_dump.py crawl.py ./
 
 # The Playwright base image ships with pwuser at UID/GID 1000.

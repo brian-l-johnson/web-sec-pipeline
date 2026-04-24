@@ -28,10 +28,15 @@ import sys
 import time
 from urllib.parse import urljoin, urlparse
 
+_playwright_import_error: str = ""
 try:
     from playwright.sync_api import sync_playwright
     from playwright.sync_api import TimeoutError as PlaywrightTimeout
-except ImportError:  # allow import without playwright for unit tests
+except Exception as _pw_err:  # broad catch — log the real error in main()
+    import traceback as _tb
+    _playwright_import_error = (
+        f"{type(_pw_err).__name__}: {_pw_err}\n{_tb.format_exc()}"
+    )
     sync_playwright = None  # type: ignore[assignment]
     PlaywrightTimeout = Exception  # type: ignore[misc,assignment]
 
@@ -213,6 +218,17 @@ def crawl(page, target_url: str, scope: list, max_urls: int, max_depth: int, tim
 # ---------------------------------------------------------------------------
 
 def main() -> int:
+    if sync_playwright is None:
+        log.error(
+            "playwright is not importable — cannot crawl.\n"
+            "Import error details:\n%s\n"
+            "Check the Python environment in this container:\n"
+            "  python3 -c \"import playwright; print(playwright.__version__)\"\n"
+            "  python3 -m pip show playwright",
+            _playwright_import_error or "(no details captured)",
+        )
+        return 1
+
     target_url = os.environ.get("TARGET_URL", "").strip()
     scope_raw = os.environ.get("SCOPE", "[]").strip()
     auth_raw = os.environ.get("AUTH_CONFIG", "").strip()
