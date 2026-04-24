@@ -1,5 +1,7 @@
 -- Migration 001: initial schema for web-sec-tools pipeline
 
+-- +goose Up
+
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
 -- ---------------------------------------------------------------------------
@@ -58,3 +60,8 @@ CREATE TABLE web_findings (
 CREATE INDEX idx_web_findings_job_id  ON web_findings (job_id);
 CREATE INDEX idx_web_findings_tool    ON web_findings (job_id, tool);
 CREATE INDEX idx_web_findings_severity ON web_findings (severity);
+
+-- +goose Down
+
+DROP TABLE IF EXISTS web_findings;
+DROP TABLE IF EXISTS web_jobs;
