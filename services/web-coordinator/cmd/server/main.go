@@ -104,6 +104,9 @@ func main() {
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 	mux.Handle("GET /swagger/", httpSwagger.WrapHandler)
+	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/swagger/index.html", http.StatusFound)
+	})
 
 	addr := fmt.Sprintf(":%s", servicePort)
 	srv := &http.Server{
