@@ -105,8 +105,14 @@ func makeJob(status string) *store.WebJob {
 	}
 }
 
+type mockSubmitter struct{}
+
+func (m *mockSubmitter) SubmitJob(_ context.Context, _ string, _ []string, _ json.RawMessage, _ string) (uuid.UUID, error) {
+	return uuid.New(), nil
+}
+
 func newTestHandler(s Storer, r JobRetriggerer) *Handler {
-	return NewHandler(s, r)
+	return NewHandler(s, r, &mockSubmitter{})
 }
 
 func doRequest(t *testing.T, h *Handler, method, path string) *httptest.ResponseRecorder {

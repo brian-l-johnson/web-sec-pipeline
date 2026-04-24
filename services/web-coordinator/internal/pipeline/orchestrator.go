@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"time"
@@ -155,6 +156,24 @@ func (o *Orchestrator) OnJobFailed(jobID uuid.UUID, tool string, logs string) {
 	// checkAndCompleteJob will mark the job complete once both are settled.
 	log.Printf("orchestrator: tool %s failed for job %s: %s", tool, jobID, logs)
 	o.checkAndCompleteJob(ctx, jobID)
+}
+
+// SubmitJob creates and immediately starts a new scan job.
+// Called directly by the web UI API endpoint (bypasses NATS).
+func (o *Orchestrator) SubmitJob(ctx context.Context, targetURL string, scope []string, authConfig json.RawMessage, scanProfile string) (uuid.UUID, error) {
+	jobID := uuid.New()
+	msg := &queue.SubmittedMessage{
+		JobID:       jobID.String(),
+		TargetURL:   targetURL,
+		Scope:       scope,
+		AuthConfig:  authConfig,
+		ScanProfile: scanProfile,
+		SubmittedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+	if err := o.HandleSubmitted(ctx, msg); err != nil {
+		return uuid.Nil, err
+	}
+	return jobID, nil
 }
 
 // RetriggerJob resets a job and re-launches the crawl.

@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -27,21 +29,28 @@ type JobRetriggerer interface {
 	RetriggerJob(ctx context.Context, job *store.WebJob) error
 }
 
+// JobSubmitter can create a new scan job directly.
+type JobSubmitter interface {
+	SubmitJob(ctx context.Context, targetURL string, scope []string, authConfig json.RawMessage, scanProfile string) (uuid.UUID, error)
+}
+
 // Handler holds shared dependencies for the HTTP handlers.
 type Handler struct {
 	store       Storer
 	retriggerer JobRetriggerer
+	submitter   JobSubmitter
 }
 
 // NewHandler creates a Handler.
-func NewHandler(s Storer, r JobRetriggerer) *Handler {
-	return &Handler{store: s, retriggerer: r}
+func NewHandler(s Storer, r JobRetriggerer, sub JobSubmitter) *Handler {
+	return &Handler{store: s, retriggerer: r, submitter: sub}
 }
 
 // RegisterRoutes wires all routes into mux.
 func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /health", h.HealthHandler)
 	mux.HandleFunc("GET /jobs", h.ListJobsHandler)
+	mux.HandleFunc("POST /jobs", h.SubmitJobHandler)
 	mux.HandleFunc("GET /jobs/{id}", h.GetJobHandler)
 	mux.HandleFunc("GET /jobs/{id}/findings", h.ListFindingsHandler)
 	mux.HandleFunc("POST /jobs/{id}/retrigger", h.RetriggerHandler)
@@ -155,9 +164,86 @@ func findingToResponse(f *store.WebFinding) FindingResponse {
 	return r
 }
 
+// submitJobRequest is the request body for POST /jobs.
+type submitJobRequest struct {
+	TargetURL   string          `json:"target_url"`
+	ScanProfile string          `json:"scan_profile"`
+	Scope       []string        `json:"scope"`
+	AuthConfig  json.RawMessage `json:"auth_config,omitempty" swaggertype:"object"`
+}
+
 // ---------------------------------------------------------------------------
 // Handlers
 // ---------------------------------------------------------------------------
+
+// SubmitJobHandler handles POST /jobs — submit a new scan job from the web UI.
+//
+// @Summary      Submit a new scan job
+// @Tags         jobs
+// @Accept       json
+// @Produce      json
+// @Param        body  body  api.submitJobRequest  true  "Scan request"
+// @Success      202  {object}  map[string]string
+// @Failure      400  {object}  map[string]string
+// @Failure      500  {object}  map[string]string
+// @Router       /jobs [post]
+func (h *Handler) SubmitJobHandler(w http.ResponseWriter, r *http.Request) {
+	var req submitJobRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+
+	// Validate target URL.
+	req.TargetURL = strings.TrimSpace(req.TargetURL)
+	if req.TargetURL == "" {
+		writeError(w, http.StatusBadRequest, "target_url is required")
+		return
+	}
+	parsed, err := url.ParseRequestURI(req.TargetURL)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+		writeError(w, http.StatusBadRequest, "target_url must be a valid http/https URL")
+		return
+	}
+
+	// Validate scan_profile.
+	if req.ScanProfile == "" {
+		req.ScanProfile = "passive"
+	}
+	switch req.ScanProfile {
+	case "passive", "active", "full":
+	default:
+		writeError(w, http.StatusBadRequest, "scan_profile must be one of: passive, active, full")
+		return
+	}
+
+	// Validate scope entries.
+	for _, s := range req.Scope {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			continue
+		}
+		p, err := url.ParseRequestURI(strings.TrimSuffix(s, "*"))
+		if err != nil || (p.Scheme != "http" && p.Scheme != "https") {
+			writeError(w, http.StatusBadRequest, "scope entries must be valid http/https URLs or wildcard patterns")
+			return
+		}
+	}
+
+	// Validate auth_config JSON (if provided).
+	if len(req.AuthConfig) > 0 && !json.Valid(req.AuthConfig) {
+		writeError(w, http.StatusBadRequest, "auth_config must be valid JSON")
+		return
+	}
+
+	jobID, err := h.submitter.SubmitJob(r.Context(), req.TargetURL, req.Scope, req.AuthConfig, req.ScanProfile)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "submit job: "+err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusAccepted, map[string]string{"job_id": jobID.String(), "status": "accepted"})
+}
 
 // HealthHandler handles GET /health.
 //

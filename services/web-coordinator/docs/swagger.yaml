@@ -68,6 +68,19 @@ definitions:
       zap_status:
         type: string
     type: object
+  api.submitJobRequest:
+    properties:
+      auth_config:
+        type: object
+      scan_profile:
+        type: string
+      scope:
+        items:
+          type: string
+        type: array
+      target_url:
+        type: string
+    type: object
 host: web-coordinator.apps.blj.wtf
 info:
   contact: {}
@@ -108,6 +121,40 @@ paths:
           schema:
             $ref: '#/definitions/api.JobListResponse'
       summary: List scan jobs
+      tags:
+      - jobs
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Scan request
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.submitJobRequest'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Submit a new scan job
       tags:
       - jobs
   /jobs/{id}:

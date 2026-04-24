@@ -10,7 +10,9 @@ package main
 
 import (
 	"context"
+	"embed"
 	"fmt"
+	"io/fs"
 	"log"
 	"net/http"
 	"os"
@@ -31,6 +33,9 @@ import (
 	"github.com/brian-l-johnson/web-sec-pipeline/services/web-coordinator/internal/queue"
 	"github.com/brian-l-johnson/web-sec-pipeline/services/web-coordinator/internal/store"
 )
+
+//go:embed ui
+var uiFiles embed.FS
 
 func main() {
 	natsURL       := getEnv("NATS_URL", "nats://localhost:4222")
@@ -100,12 +105,25 @@ func main() {
 		}
 	}()
 
-	h := api.NewHandler(s, orch)
+	h := api.NewHandler(s, orch, orch)
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 	mux.Handle("GET /swagger/", httpSwagger.WrapHandler)
+
+	// Serve the embedded web UI at /ui/.
+	uiSub, err := fs.Sub(uiFiles, "ui")
+	if err != nil {
+		log.Fatalf("embed ui sub: %v", err) // should never happen with valid embed path
+	}
+	mux.Handle("GET /ui/", http.StripPrefix("/ui/", http.FileServer(http.FS(uiSub))))
+
+	// Root redirects to the web UI.
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/swagger/index.html", http.StatusFound)
+		if r.URL.Path != "/" {
+			http.NotFound(w, r)
+			return
+		}
+		http.Redirect(w, r, "/ui/", http.StatusFound)
 	})
 
 	addr := fmt.Sprintf(":%s", servicePort)

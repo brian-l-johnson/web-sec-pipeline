@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Web Security Scanner</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:       #0f1117;
+    --surface:  #1a1d27;
+    --border:   #2a2d3a;
+    --text:     #e2e4ed;
+    --muted:    #7a7f99;
+    --accent:   #5b8dee;
+    --green:    #3ecf8e;
+    --red:      #e05c6a;
+    --yellow:   #f0b429;
+    --purple:   #a78bfa;
+    --radius:   8px;
+    --mono:     'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+    min-height: 100vh;
+  }
+
+  header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 14px 24px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  header h1 { font-size: 16px; font-weight: 600; letter-spacing: .3px; }
+  header .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 6px var(--green); }
+  header .sub { color: var(--muted); font-size: 12px; margin-left: auto; }
+
+  main { max-width: 1200px; margin: 0 auto; padding: 24px; }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    margin-bottom: 20px;
+  }
+  .card h2 { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); margin-bottom: 16px; }
+
+  .form-row { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; }
+  .form-group { display: flex; flex-direction: column; gap: 6px; }
+  .form-group.grow { flex: 1; min-width: 240px; }
+  label { font-size: 12px; color: var(--muted); font-weight: 500; }
+  input, select, textarea {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-size: 13px;
+    padding: 8px 10px;
+    outline: none;
+    width: 100%;
+    font-family: inherit;
+  }
+  input:focus, select:focus, textarea:focus { border-color: var(--accent); }
+  textarea { resize: vertical; font-family: var(--mono); font-size: 12px; }
+  select option { background: var(--surface); }
+
+  button {
+    cursor: pointer;
+    border: none;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 8px 18px;
+    transition: opacity .15s;
+  }
+  button:hover { opacity: .85; }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-sm { padding: 4px 10px; font-size: 12px; font-weight: 500; }
+  .btn-ghost { background: transparent; border: 1px solid var(--border); color: var(--text); }
+  .btn-danger-sm { background: transparent; border: 1px solid var(--red); color: var(--red); }
+
+  .section-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+  .section-header h2 { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); }
+  .section-header .count { background: var(--border); border-radius: 12px; padding: 1px 8px; font-size: 11px; color: var(--muted); }
+  .section-header .refresh-hint { margin-left: auto; font-size: 11px; color: var(--muted); }
+
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; }
+  th {
+    text-align: left;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .6px;
+    color: var(--muted);
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  td {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  tr:last-child td { border-bottom: none; }
+  tr.findings-row td { padding: 0; }
+  tr:hover:not(.findings-row) td { background: rgba(255,255,255,.02); }
+
+  .url-cell {
+    font-family: var(--mono);
+    font-size: 12px;
+    max-width: 260px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .job-id {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+  }
+
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    border-radius: 4px;
+    padding: 2px 7px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .4px;
+  }
+  .badge::before { content: ''; width: 5px; height: 5px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
+  .badge-running  { color: var(--accent); background: rgba(91,141,238,.12); }
+  .badge-complete { color: var(--green);  background: rgba(62,207,142,.12); }
+  .badge-failed   { color: var(--red);    background: rgba(224,92,106,.12);  }
+  .badge-pending  { color: var(--muted);  background: rgba(122,127,153,.12); }
+
+  .tool-pills { display: flex; gap: 4px; flex-wrap: wrap; }
+  .pill {
+    font-size: 10px;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 3px;
+    text-transform: uppercase;
+    letter-spacing: .4px;
+  }
+  .pill-zap    { background: rgba(240,180,41,.15); color: var(--yellow); }
+  .pill-nuclei { background: rgba(167,139,250,.15); color: var(--purple); }
+  .pill-crawl  { background: rgba(91,141,238,.15);  color: var(--accent); }
+  .pill-ok     { opacity: 1; }
+  .pill-fail   { text-decoration: line-through; opacity: .5; }
+  .pill-pend   { opacity: .3; }
+
+  .actions { display: flex; gap: 6px; }
+
+  /* Findings panel */
+  .findings-panel {
+    background: rgba(0,0,0,.3);
+    border-top: 1px solid var(--border);
+    padding: 16px 20px;
+  }
+  .findings-panel h3 {
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .6px;
+    color: var(--muted);
+    margin-bottom: 12px;
+  }
+  .findings-table { width: 100%; border-collapse: collapse; }
+  .findings-table th {
+    font-size: 10px;
+    color: var(--muted);
+    padding: 5px 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  .findings-table td {
+    font-size: 12px;
+    padding: 7px 8px;
+    border-bottom: 1px solid rgba(42,45,58,.5);
+    vertical-align: top;
+  }
+  .findings-table tr:last-child td { border-bottom: none; }
+
+  .sev { font-size: 10px; font-weight: 700; text-transform: uppercase; padding: 2px 6px; border-radius: 3px; white-space: nowrap; }
+  .sev-critical { background: rgba(224,92,106,.25);  color: #ff8090; }
+  .sev-high     { background: rgba(240,130,30,.20);  color: #f08020; }
+  .sev-medium   { background: rgba(240,180,41,.15);  color: var(--yellow); }
+  .sev-low      { background: rgba(62,207,142,.12);  color: var(--green); }
+  .sev-info     { background: rgba(122,127,153,.12); color: var(--muted); }
+
+  .no-findings { color: var(--muted); font-size: 12px; font-style: italic; text-align: center; padding: 12px 0; }
+  .empty-state { text-align: center; padding: 40px; color: var(--muted); }
+  .empty-state p { margin-top: 8px; font-size: 12px; }
+
+  .toast {
+    position: fixed;
+    bottom: 24px; right: 24px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 12px 16px;
+    font-size: 13px;
+    box-shadow: 0 4px 20px rgba(0,0,0,.4);
+    z-index: 999;
+    display: none;
+    max-width: 340px;
+  }
+  .toast.show { display: block; }
+  .toast.error { border-color: var(--red); color: var(--red); }
+  .toast.success { border-color: var(--green); color: var(--green); }
+
+  .spinner {
+    display: inline-block;
+    width: 10px; height: 10px;
+    border: 2px solid rgba(255,255,255,.2);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin .7s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="dot"></div>
+  <h1>Web Security Scanner</h1>
+  <span class="sub" id="last-refresh"></span>
+</header>
+
+<main>
+
+  <!-- Submit Form -->
+  <div class="card">
+    <h2>New Scan</h2>
+    <div class="form-row">
+      <div class="form-group grow">
+        <label for="url">Target URL</label>
+        <input id="url" type="url" placeholder="https://example.com" autocomplete="off">
+      </div>
+      <div class="form-group">
+        <label for="profile">Scan Profile</label>
+        <select id="profile">
+          <option value="passive">Passive</option>
+          <option value="active">Active</option>
+          <option value="full">Full</option>
+        </select>
+      </div>
+      <div class="form-group grow">
+        <label for="scope">Scope (one URL/pattern per line, optional)</label>
+        <textarea id="scope" rows="2" placeholder="https://example.com/*&#10;https://api.example.com/*"></textarea>
+      </div>
+      <div class="form-group">
+        <label>&nbsp;</label>
+        <button class="btn-primary" id="submit-btn" onclick="submitJob()">Start Scan</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Jobs Table -->
+  <div class="section-header">
+    <h2>Jobs</h2>
+    <span class="count" id="job-count">0</span>
+    <span class="refresh-hint" id="refresh-status">Refreshing every 5s</span>
+  </div>
+
+  <div class="card" style="padding: 0; overflow: hidden;">
+    <div class="table-wrap">
+      <table id="jobs-table">
+        <thead>
+          <tr>
+            <th>Target</th>
+            <th>Profile</th>
+            <th>Status</th>
+            <th>Crawl</th>
+            <th>ZAP</th>
+            <th>Nuclei</th>
+            <th>Submitted</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="jobs-tbody">
+          <tr><td colspan="8" class="empty-state">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+'use strict';
+
+let expandedJobId = null;
+let jobs = [];
+
+// ── Formatting helpers ────────────────────────────────────────────────────────
+
+function relativeTime(iso) {
+  if (!iso) return '—';
+  const diff = Date.now() - new Date(iso).getTime();
+  const s = Math.floor(diff / 1000);
+  if (s < 60)  return s + 's ago';
+  if (s < 3600) return Math.floor(s/60) + 'm ago';
+  if (s < 86400) return Math.floor(s/3600) + 'h ago';
+  return Math.floor(s/86400) + 'd ago';
+}
+
+function badge(status) {
+  return `<span class="badge badge-${status}">${status}</span>`;
+}
+
+function pillStatus(status) {
+  if (status === 'complete') return 'ok';
+  if (status === 'failed')   return 'fail';
+  if (status === 'running')  return 'ok';
+  return 'pend';
+}
+
+function toolPill(label, status) {
+  const cls = ['pill', `pill-${label.toLowerCase()}`, `pill-${pillStatus(status)}`].join(' ');
+  const icon = status === 'running' ? ' <span class="spinner"></span>' : '';
+  return `<span class="${cls}" title="${label}: ${status}">${label}${icon}</span>`;
+}
+
+function sevBadge(sev) {
+  return `<span class="sev sev-${sev}">${sev}</span>`;
+}
+
+function shortId(id) {
+  return id.slice(0, 8);
+}
+
+// ── Jobs rendering ─────────────────────────────────────────────────────────
+
+function renderJobs(data) {
+  jobs = data.jobs || [];
+  const tbody = document.getElementById('jobs-tbody');
+  document.getElementById('job-count').textContent = data.total ?? jobs.length;
+
+  if (jobs.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="8" class="empty-state">
+      <div>No scans yet</div>
+      <p>Submit a target URL above to start your first scan.</p>
+    </td></tr>`;
+    return;
+  }
+
+  const rows = jobs.flatMap(j => {
+    const isExpanded = expandedJobId === j.job_id;
+    const row = `<tr data-id="${j.job_id}">
+      <td>
+        <div class="url-cell" title="${esc(j.target_url)}">${esc(j.target_url)}</div>
+        <div class="job-id">${shortId(j.job_id)}</div>
+      </td>
+      <td>${esc(j.scan_profile)}</td>
+      <td>${badge(j.status)}</td>
+      <td>${toolPill('Crawl', j.crawl_status)}</td>
+      <td>${toolPill('ZAP', j.zap_status)}</td>
+      <td>${toolPill('Nuclei', j.nuclei_status)}</td>
+      <td title="${esc(j.submitted_at)}">${relativeTime(j.submitted_at)}</td>
+      <td>
+        <div class="actions">
+          <button class="btn-ghost btn-sm" onclick="toggleFindings('${j.job_id}')">
+            ${isExpanded ? 'Hide' : 'Findings'}
+          </button>
+          ${j.status !== 'running' ? `<button class="btn-danger-sm btn-sm" onclick="retrigger('${j.job_id}')">Re-run</button>` : ''}
+        </div>
+      </td>
+    </tr>`;
+
+    const findingsRow = isExpanded
+      ? `<tr class="findings-row" id="findings-row-${j.job_id}"><td colspan="8"><div class="findings-panel" id="findings-panel-${j.job_id}"><p style="color:var(--muted);font-size:12px">Loading findings…</p></div></td></tr>`
+      : '';
+
+    return row + findingsRow;
+  });
+
+  tbody.innerHTML = rows.join('');
+
+  // Reload findings for the currently expanded job.
+  if (expandedJobId) {
+    const job = jobs.find(j => j.job_id === expandedJobId);
+    if (job) loadFindings(expandedJobId);
+    else expandedJobId = null;
+  }
+}
+
+// ── Findings ────────────────────────────────────────────────────────────────
+
+async function toggleFindings(jobId) {
+  if (expandedJobId === jobId) {
+    expandedJobId = null;
+    await fetchJobs();
+    return;
+  }
+  expandedJobId = jobId;
+  await fetchJobs();
+}
+
+async function loadFindings(jobId) {
+  const panel = document.getElementById(`findings-panel-${jobId}`);
+  if (!panel) return;
+
+  try {
+    const resp = await fetch(`/jobs/${jobId}/findings`);
+    const data = await resp.json();
+    const findings = data.findings || [];
+
+    if (findings.length === 0) {
+      panel.innerHTML = `<h3>Findings</h3><p class="no-findings">No findings recorded yet.</p>`;
+      return;
+    }
+
+    const rows = findings.map(f => `<tr>
+      <td>${sevBadge(f.severity)}</td>
+      <td>${esc(f.title)}</td>
+      <td style="font-family:var(--mono);font-size:11px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(f.url)}">${esc(f.url)}</td>
+      <td><span style="font-size:11px;text-transform:uppercase;font-weight:600;color:var(--muted)">${esc(f.tool)}</span></td>
+      ${f.cwe ? `<td><a href="https://cwe.mitre.org/data/definitions/${f.cwe}.html" target="_blank" style="color:var(--accent);font-size:11px">CWE-${f.cwe}</a></td>` : '<td style="color:var(--muted)">—</td>'}
+      <td style="font-size:11px;color:var(--muted);max-width:300px">${esc(f.description || '')}</td>
+    </tr>`).join('');
+
+    panel.innerHTML = `
+      <h3>Findings (${findings.length})</h3>
+      <div style="overflow-x:auto">
+      <table class="findings-table">
+        <thead><tr>
+          <th>Severity</th><th>Title</th><th>URL</th><th>Tool</th><th>CWE</th><th>Description</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+      </div>`;
+  } catch (e) {
+    panel.innerHTML = `<p style="color:var(--red);font-size:12px">Failed to load findings: ${esc(e.message)}</p>`;
+  }
+}
+
+// ── Fetch jobs ───────────────────────────────────────────────────────────────
+
+async function fetchJobs() {
+  try {
+    const resp = await fetch('/jobs?limit=50');
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    renderJobs(data);
+    document.getElementById('last-refresh').textContent =
+      'Updated ' + new Date().toLocaleTimeString();
+  } catch (e) {
+    document.getElementById('refresh-status').textContent = 'Refresh error — retrying…';
+  }
+}
+
+// ── Submit job ───────────────────────────────────────────────────────────────
+
+async function submitJob() {
+  const urlVal     = document.getElementById('url').value.trim();
+  const profile    = document.getElementById('profile').value;
+  const scopeRaw   = document.getElementById('scope').value.trim();
+
+  if (!urlVal) { showToast('Please enter a target URL.', 'error'); return; }
+
+  let parsedUrl;
+  try {
+    parsedUrl = new URL(urlVal);
+    if (!['http:', 'https:'].includes(parsedUrl.protocol)) throw new Error();
+  } catch {
+    showToast('Target URL must start with http:// or https://', 'error');
+    return;
+  }
+
+  const scope = scopeRaw ? scopeRaw.split('\n').map(s => s.trim()).filter(Boolean) : [];
+
+  const btn = document.getElementById('submit-btn');
+  btn.disabled = true;
+  btn.textContent = 'Starting…';
+
+  try {
+    const resp = await fetch('/jobs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ target_url: urlVal, scan_profile: profile, scope }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+
+    document.getElementById('url').value = '';
+    document.getElementById('scope').value = '';
+    showToast(`Scan started — job ${shortId(data.job_id)}`, 'success');
+    await fetchJobs();
+  } catch (e) {
+    showToast('Failed to start scan: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Start Scan';
+  }
+}
+
+// ── Retrigger ────────────────────────────────────────────────────────────────
+
+async function retrigger(jobId) {
+  try {
+    const resp = await fetch(`/jobs/${jobId}/retrigger`, { method: 'POST' });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+    showToast('Job retriggered', 'success');
+    await fetchJobs();
+  } catch (e) {
+    showToast('Retrigger failed: ' + e.message, 'error');
+  }
+}
+
+// ── Toast ────────────────────────────────────────────────────────────────────
+
+function showToast(msg, type = 'success') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = `toast show ${type}`;
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => t.classList.remove('show'), 4000);
+}
+
+// ── Escape HTML ───────────────────────────────────────────────────────────────
+
+function esc(str) {
+  return String(str ?? '')
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;');
+}
+
+// ── Boot ─────────────────────────────────────────────────────────────────────
+
+fetchJobs();
+setInterval(fetchJobs, 5000);
+
+// Submit on Enter in the URL field.
+document.getElementById('url').addEventListener('keydown', e => {
+  if (e.key === 'Enter') submitJob();
+});
+</script>
+</body>
+</html>
