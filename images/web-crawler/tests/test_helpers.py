@@ -101,28 +101,11 @@ def test_har_dump_writes_file(monkeypatch, tmp_path):
     from har_dump import HarDump
 
     har_path = str(tmp_path / "capture.har")
+    monkeypatch.setenv("HARDUMP_PATH", har_path)
 
-    # Monkey-patch ctx.options to return our test path.
-    class FakeOptions:
-        hardump = har_path
-
-    class FakeCtx:
-        options = FakeOptions()
-        class log:
-            @staticmethod
-            def info(msg): pass
-
-    import har_dump as hd
-    original_ctx = hd.ctx
-    hd.ctx = FakeCtx()
-
-    try:
-        addon = HarDump()
-        # Manually add a fake entry to the HAR log.
-        addon.har["log"]["entries"].append({"fake": "entry"})
-        addon.done()
-    finally:
-        hd.ctx = original_ctx
+    addon = HarDump()
+    addon.har["log"]["entries"].append({"fake": "entry"})
+    addon.done()
 
     assert os.path.exists(har_path), "HAR file should be written"
     with open(har_path) as f:
@@ -131,25 +114,14 @@ def test_har_dump_writes_file(monkeypatch, tmp_path):
     assert len(data["log"]["entries"]) == 1
 
 
-def test_har_dump_no_path_does_not_write(tmp_path):
-    """If hardump option is empty, no file should be written."""
+def test_har_dump_no_path_does_not_write(monkeypatch, tmp_path):
+    """If HARDUMP_PATH is not set, no file should be written."""
     from har_dump import HarDump
 
-    class FakeOptions:
-        hardump = ""
+    monkeypatch.delenv("HARDUMP_PATH", raising=False)
 
-    class FakeCtx:
-        options = FakeOptions()
-
-    import har_dump as hd
-    original_ctx = hd.ctx
-    hd.ctx = FakeCtx()
-
-    try:
-        addon = HarDump()
-        addon.done()  # should be a no-op
-    finally:
-        hd.ctx = original_ctx
+    addon = HarDump()
+    addon.done()  # should be a no-op
 
     # No file should have been written anywhere in tmp_path.
     assert list(tmp_path.iterdir()) == []

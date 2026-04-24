@@ -268,14 +268,19 @@ def main() -> int:
         "mitmdump",
         "--listen-port", str(proxy_port),
         "-s", "/app/har_dump.py",
-        "--set", f"hardump={har_path}",
         "--quiet",
     ]
+    # Pass the HAR output path via env var — more reliable than --set for
+    # addon-defined options, which can be silently ignored in mitmproxy 10+.
+    mitm_env = os.environ.copy()
+    mitm_env["HARDUMP_PATH"] = har_path
+
     log.info(f"Starting mitmproxy on :{proxy_port}...")
     mitm_proc = subprocess.Popen(
         mitmdump_cmd,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
+        env=mitm_env,
     )
 
     if not wait_for_port("127.0.0.1", proxy_port, timeout=30.0):

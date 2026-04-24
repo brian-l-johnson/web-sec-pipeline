@@ -30,14 +30,6 @@ class HarDump:
             }
         }
 
-    def load(self, loader) -> None:
-        loader.add_option(
-            name="hardump",
-            typespec=str,
-            default="",
-            help="Destination file for HAR output.",
-        )
-
     def response(self, flow: http.HTTPFlow) -> None:
         if flow.response is None:
             return
@@ -47,7 +39,10 @@ class HarDump:
         self.har["log"]["entries"].append(self._build_entry(flow))
 
     def done(self) -> None:
-        output_path: str = ctx.options.hardump
+        # Read path from env var — more reliable than mitmproxy's option
+        # system, where addon-defined --set options can be silently ignored
+        # if processed before the addon's load() hook registers them.
+        output_path: str = os.environ.get("HARDUMP_PATH", "")
         if not output_path:
             return
         parent = os.path.dirname(output_path)
