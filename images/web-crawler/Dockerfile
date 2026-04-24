@@ -2,6 +2,10 @@ FROM mcr.microsoft.com/playwright/python:v1.49.0-jammy
 
 WORKDIR /app
 
+# python3-venv is not included in the playwright base image on jammy.
+RUN apt-get update -q && apt-get install -y --no-install-recommends python3-venv \
+ && rm -rf /var/lib/apt/lists/*
+
 # Install mitmproxy in an isolated venv so its dependency tree cannot
 # overwrite or downgrade packages that playwright depends on (greenlet,
 # anyio, h2, etc.).  Only mitmdump needs to be on PATH for crawl.py.
