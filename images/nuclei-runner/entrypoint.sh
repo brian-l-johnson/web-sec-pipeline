@@ -5,42 +5,38 @@ set -eu
 : "${TARGET_URL:?TARGET_URL env var is required}"
 : "${OUTPUT_DIR:?OUTPUT_DIR env var is required}"
 
+# Strip URL fragment (#...) — fragments are client-side routing only and
+# cause HTTP scanners to send malformed or empty requests.
+TARGET_URL=$(printf '%s' "${TARGET_URL}" | sed 's/#.*//')
+
 TEMPLATES="${HOME}/nuclei-templates"
 
 mkdir -p "${OUTPUT_DIR}"
 
 echo "[nuclei-runner] TARGET_URL=${TARGET_URL}"
 echo "[nuclei-runner] OUTPUT_DIR=${OUTPUT_DIR}"
-echo "[nuclei-runner] HOME=${HOME}"
-echo "[nuclei-runner] TEMPLATES=${TEMPLATES}"
 echo "[nuclei-runner] nuclei version: $(nuclei -version 2>&1 | head -1)"
-
-# Dump top-level template directory so we can see the actual structure.
-echo "[nuclei-runner] templates top-level:"
-ls "${TEMPLATES}/" 2>&1 | head -30 || echo "(ls failed)"
 
 if [ ! -d "${TEMPLATES}" ] || [ -z "$(ls -A "${TEMPLATES}" 2>/dev/null)" ]; then
     echo "[nuclei-runner] ERROR: templates not found at '${TEMPLATES}'" >&2
     exit 1
 fi
 
-echo "[nuclei-runner] Starting scan..."
-
-# Use the http/ subtree which covers cves, vulnerabilities, misconfiguration
-# etc. in the restructured nuclei-templates layout (templates v9+).
-# Fall back to scanning everything if http/ doesn't exist.
+# Use http/ subtree (nuclei-templates v9+ layout).
+# Fall back to entire templates dir if http/ is absent.
 if [ -d "${TEMPLATES}/http" ]; then
-    TEMPLATE_ARG="-t http"
+    TEMPLATE_ARG="http"
 else
-    TEMPLATE_ARG="-t ."
+    TEMPLATE_ARG="."
 fi
 
-echo "[nuclei-runner] template arg: ${TEMPLATE_ARG}"
+echo "[nuclei-runner] Starting scan (templates: ${TEMPLATE_ARG})..."
 
 exec nuclei \
     -u "${TARGET_URL}" \
-    ${TEMPLATE_ARG} \
-    -severity medium,high,critical \
+    -t "${TEMPLATE_ARG}" \
+    -severity low,medium,high,critical \
     -json-export "${OUTPUT_DIR}/nuclei.jsonl" \
     -no-interactsh \
-    -silent
+    -stats \
+    -v

@@ -6,6 +6,10 @@ set -euo pipefail
 : "${OUTPUT_DIR:?OUTPUT_DIR env var is required}"
 SCAN_PROFILE="${SCAN_PROFILE:-passive}"
 
+# Strip URL fragment (#...) — fragments are client-side routing only and
+# cause HTTP scanners to send malformed or empty requests.
+TARGET_URL=$(printf '%s' "${TARGET_URL}" | sed 's/#.*//')
+
 mkdir -p "${OUTPUT_DIR}"
 
 PLAN="/tmp/automation-plan-${$}.yaml"

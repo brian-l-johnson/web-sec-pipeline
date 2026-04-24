@@ -205,6 +205,9 @@ func (h *Handler) SubmitJobHandler(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "target_url must be a valid http/https URL")
 		return
 	}
+	// Strip fragment — it's client-side routing only, scanners should never see it.
+	parsed.Fragment = ""
+	req.TargetURL = parsed.String()
 
 	// Validate scan_profile.
 	if req.ScanProfile == "" {
