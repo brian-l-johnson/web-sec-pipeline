@@ -53,16 +53,16 @@ func zapRiskToSeverity(riskdesc string) string {
 }
 
 // parseAndStoreZAPFindings reads the ZAP JSON report from reportPath and
-// inserts one web_findings row per alert instance.
-func (o *Orchestrator) parseAndStoreZAPFindings(ctx context.Context, jobID uuid.UUID, reportPath string) error {
+// inserts one web_findings row per alert instance. Returns the number stored.
+func (o *Orchestrator) parseAndStoreZAPFindings(ctx context.Context, jobID uuid.UUID, reportPath string) (int, error) {
 	data, err := os.ReadFile(reportPath)
 	if err != nil {
-		return fmt.Errorf("read zap report: %w", err)
+		return 0, fmt.Errorf("read zap report: %w", err)
 	}
 
 	var report zapReport
 	if err := json.Unmarshal(data, &report); err != nil {
-		return fmt.Errorf("parse zap report json: %w", err)
+		return 0, fmt.Errorf("parse zap report json: %w", err)
 	}
 
 	count := 0
@@ -99,7 +99,7 @@ func (o *Orchestrator) parseAndStoreZAPFindings(ctx context.Context, jobID uuid.
 		}
 	}
 	log.Printf("orchestrator: stored %d ZAP findings for job %s", count, jobID)
-	return nil
+	return count, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -148,10 +148,11 @@ func nucleiSeverityNorm(s string) string {
 }
 
 // parseAndStoreNucleiFindings reads Nuclei's JSONL output and inserts findings.
-func (o *Orchestrator) parseAndStoreNucleiFindings(ctx context.Context, jobID uuid.UUID, reportPath string) error {
+// Returns the number stored.
+func (o *Orchestrator) parseAndStoreNucleiFindings(ctx context.Context, jobID uuid.UUID, reportPath string) (int, error) {
 	f, err := os.Open(reportPath)
 	if err != nil {
-		return fmt.Errorf("open nuclei report: %w", err)
+		return 0, fmt.Errorf("open nuclei report: %w", err)
 	}
 	defer f.Close()
 
@@ -189,8 +190,8 @@ func (o *Orchestrator) parseAndStoreNucleiFindings(ctx context.Context, jobID uu
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("scan nuclei report: %w", err)
+		return 0, fmt.Errorf("scan nuclei report: %w", err)
 	}
 	log.Printf("orchestrator: stored %d Nuclei findings for job %s", count, jobID)
-	return nil
+	return count, nil
 }

@@ -38,5 +38,6 @@ exec nuclei \
     -severity low,medium,high,critical \
     -json-export "${OUTPUT_DIR}/nuclei.jsonl" \
     -no-interactsh \
+    -system-resolvers \
     -stats \
     -v

@@ -3,8 +3,10 @@ package pipeline
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
+	"os"
 	"time"
 
 	"github.com/google/uuid"
@@ -120,14 +122,14 @@ func (o *Orchestrator) OnJobComplete(jobID uuid.UUID, tool string) {
 
 	case "zap":
 		reportPath := fmt.Sprintf("%s/output/%s/zap/report.json", o.dataDir, jobID)
-		if err := o.parseAndStoreZAPFindings(ctx, jobID, reportPath); err != nil {
+		if _, err := o.parseAndStoreZAPFindings(ctx, jobID, reportPath); err != nil {
 			log.Printf("orchestrator: zap findings parse error (job=%s): %v", jobID, err)
 		}
 		o.checkAndCompleteJob(ctx, jobID)
 
 	case "nuclei":
 		reportPath := fmt.Sprintf("%s/output/%s/nuclei/nuclei.jsonl", o.dataDir, jobID)
-		if err := o.parseAndStoreNucleiFindings(ctx, jobID, reportPath); err != nil {
+		if _, err := o.parseAndStoreNucleiFindings(ctx, jobID, reportPath); err != nil {
 			log.Printf("orchestrator: nuclei findings parse error (job=%s): %v", jobID, err)
 		}
 		o.checkAndCompleteJob(ctx, jobID)
@@ -226,6 +228,30 @@ func (o *Orchestrator) launchScanners(ctx context.Context, jobID uuid.UUID) {
 			o.checkAndCompleteJob(ctx, jobID)
 		}
 	}()
+}
+
+// ReparseFindings deletes existing findings for the job and re-reads the ZAP
+// and Nuclei report files from disk. Missing files are skipped silently.
+// Returns the counts of ZAP and Nuclei findings stored.
+func (o *Orchestrator) ReparseFindings(ctx context.Context, jobID uuid.UUID) (int, int, error) {
+	if err := o.store.DeleteFindingsForJob(ctx, jobID); err != nil {
+		return 0, 0, fmt.Errorf("delete existing findings: %w", err)
+	}
+
+	zapPath := fmt.Sprintf("%s/output/%s/zap/report.json", o.dataDir, jobID)
+	zapCount, err := o.parseAndStoreZAPFindings(ctx, jobID, zapPath)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		log.Printf("orchestrator: reparse zap findings failed (job=%s): %v", jobID, err)
+	}
+
+	nucleiPath := fmt.Sprintf("%s/output/%s/nuclei/nuclei.jsonl", o.dataDir, jobID)
+	nucleiCount, err := o.parseAndStoreNucleiFindings(ctx, jobID, nucleiPath)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		log.Printf("orchestrator: reparse nuclei findings failed (job=%s): %v", jobID, err)
+	}
+
+	log.Printf("orchestrator: reparsed findings for job %s (zap=%d nuclei=%d)", jobID, zapCount, nucleiCount)
+	return zapCount, nucleiCount, nil
 }
 
 // checkAndCompleteJob marks the overall job complete when both ZAP and Nuclei

@@ -111,8 +111,18 @@ func (m *mockSubmitter) SubmitJob(_ context.Context, _ string, _ []string, _ jso
 	return uuid.New(), nil
 }
 
+type mockReparserer struct {
+	zapFindings    int
+	nucleiFindings int
+	err            error
+}
+
+func (m *mockReparserer) ReparseFindings(_ context.Context, _ uuid.UUID) (int, int, error) {
+	return m.zapFindings, m.nucleiFindings, m.err
+}
+
 func newTestHandler(s Storer, r JobRetriggerer) *Handler {
-	return NewHandler(s, r, &mockSubmitter{})
+	return NewHandler(s, r, &mockSubmitter{}, &mockReparserer{})
 }
 
 func doRequest(t *testing.T, h *Handler, method, path string) *httptest.ResponseRecorder {
@@ -364,5 +374,80 @@ func TestRetriggerHandler_InvalidID(t *testing.T) {
 	rec := doRequestWithBody(t, h, http.MethodPost, "/jobs/not-a-uuid/retrigger", "")
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", rec.Code)
+	}
+}
+
+func TestReparseHandler_Success(t *testing.T) {
+	s := newMockStore()
+	job := makeJob("complete")
+	s.jobs[job.ID] = job
+
+	mux := http.NewServeMux()
+	h := NewHandler(s, &mockRetriggerer{}, &mockSubmitter{}, &mockReparserer{zapFindings: 3, nucleiFindings: 2})
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodPost, "/jobs/"+job.ID.String()+"/reparse-findings", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body)
+	}
+	var resp ReparseResponse
+	json.NewDecoder(rec.Body).Decode(&resp)
+	if resp.ZAPFindings != 3 {
+		t.Errorf("zap_findings = %d, want 3", resp.ZAPFindings)
+	}
+	if resp.NucleiFindings != 2 {
+		t.Errorf("nuclei_findings = %d, want 2", resp.NucleiFindings)
+	}
+	if resp.JobID != job.ID.String() {
+		t.Errorf("job_id = %q, want %q", resp.JobID, job.ID.String())
+	}
+}
+
+func TestReparseHandler_JobNotFound(t *testing.T) {
+	mux := http.NewServeMux()
+	h := NewHandler(newMockStore(), &mockRetriggerer{}, &mockSubmitter{}, &mockReparserer{})
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodPost, "/jobs/"+uuid.NewString()+"/reparse-findings", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", rec.Code)
+	}
+}
+
+func TestReparseHandler_InvalidID(t *testing.T) {
+	mux := http.NewServeMux()
+	h := NewHandler(newMockStore(), &mockRetriggerer{}, &mockSubmitter{}, &mockReparserer{})
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodPost, "/jobs/not-a-uuid/reparse-findings", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", rec.Code)
+	}
+}
+
+func TestReparseHandler_ReparserError(t *testing.T) {
+	s := newMockStore()
+	job := makeJob("complete")
+	s.jobs[job.ID] = job
+
+	mux := http.NewServeMux()
+	h := NewHandler(s, &mockRetriggerer{}, &mockSubmitter{}, &mockReparserer{err: fmt.Errorf("db error")})
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodPost, "/jobs/"+job.ID.String()+"/reparse-findings", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500", rec.Code)
 	}
 }

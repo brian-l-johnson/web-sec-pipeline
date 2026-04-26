@@ -34,16 +34,23 @@ type JobSubmitter interface {
 	SubmitJob(ctx context.Context, targetURL string, scope []string, authConfig json.RawMessage, scanProfile string) (uuid.UUID, error)
 }
 
+// FindingsReparserer can re-parse on-disk scan reports for a job without
+// re-running the underlying scanners.
+type FindingsReparserer interface {
+	ReparseFindings(ctx context.Context, jobID uuid.UUID) (zapFindings, nucleiFindings int, err error)
+}
+
 // Handler holds shared dependencies for the HTTP handlers.
 type Handler struct {
 	store       Storer
 	retriggerer JobRetriggerer
 	submitter   JobSubmitter
+	reparserer  FindingsReparserer
 }
 
 // NewHandler creates a Handler.
-func NewHandler(s Storer, r JobRetriggerer, sub JobSubmitter) *Handler {
-	return &Handler{store: s, retriggerer: r, submitter: sub}
+func NewHandler(s Storer, r JobRetriggerer, sub JobSubmitter, rep FindingsReparserer) *Handler {
+	return &Handler{store: s, retriggerer: r, submitter: sub, reparserer: rep}
 }
 
 // RegisterRoutes wires all routes into mux.
@@ -53,6 +60,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /jobs", h.SubmitJobHandler)
 	mux.HandleFunc("GET /jobs/{id}", h.GetJobHandler)
 	mux.HandleFunc("GET /jobs/{id}/findings", h.ListFindingsHandler)
+	mux.HandleFunc("POST /jobs/{id}/reparse-findings", h.ReparseHandler)
 	mux.HandleFunc("POST /jobs/{id}/retrigger", h.RetriggerHandler)
 }
 
@@ -118,6 +126,13 @@ type JobListResponse struct {
 type FindingsListResponse struct {
 	Total    int               `json:"total"`
 	Findings []FindingResponse `json:"findings"`
+}
+
+// ReparseResponse is returned by POST /jobs/{id}/reparse-findings.
+type ReparseResponse struct {
+	JobID          string `json:"job_id"`
+	ZAPFindings    int    `json:"zap_findings"`
+	NucleiFindings int    `json:"nuclei_findings"`
 }
 
 func jobToResponse(j *store.WebJob) JobResponse {
@@ -371,6 +386,47 @@ func (h *Handler) ListFindingsHandler(w http.ResponseWriter, r *http.Request) {
 		resp.Findings[i] = findingToResponse(&findings[i])
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// ReparseHandler handles POST /jobs/{id}/reparse-findings.
+//
+// @Summary      Re-parse on-disk scan reports
+// @Description  Deletes existing findings for the job and re-reads the ZAP and Nuclei report files from disk. Useful when findings failed to store due to a parsing bug. Does not re-run the scanners.
+// @Tags         jobs
+// @Produce      json
+// @Param        id  path  string  true  "Job UUID"
+// @Success      200  {object}  api.ReparseResponse
+// @Failure      400  {object}  map[string]string
+// @Failure      404  {object}  map[string]string
+// @Failure      500  {object}  map[string]string
+// @Router       /jobs/{id}/reparse-findings [post]
+func (h *Handler) ReparseHandler(w http.ResponseWriter, r *http.Request) {
+	jobID, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid job ID")
+		return
+	}
+
+	if _, err := h.store.GetJob(r.Context(), jobID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "job not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "getting job: "+err.Error())
+		return
+	}
+
+	zapN, nucleiN, err := h.reparserer.ReparseFindings(r.Context(), jobID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "reparse findings: "+err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, ReparseResponse{
+		JobID:          jobID.String(),
+		ZAPFindings:    zapN,
+		NucleiFindings: nucleiN,
+	})
 }
 
 // RetriggerHandler handles POST /jobs/{id}/retrigger.

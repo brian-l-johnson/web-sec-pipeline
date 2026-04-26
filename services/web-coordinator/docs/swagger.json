@@ -208,6 +208,62 @@
                 }
             }
         },
+        "/jobs/{id}/reparse-findings": {
+            "post": {
+                "description": "Deletes existing findings for the job and re-reads the ZAP and Nuclei report files from disk. Useful when findings failed to store due to a parsing bug. Does not re-run the scanners.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "jobs"
+                ],
+                "summary": "Re-parse on-disk scan reports",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Job UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.ReparseResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/jobs/{id}/retrigger": {
             "post": {
                 "description": "Resets a failed or complete job and re-runs the full scan pipeline.",
@@ -370,6 +426,20 @@
                 },
                 "zap_status": {
                     "type": "string"
+                }
+            }
+        },
+        "api.ReparseResponse": {
+            "type": "object",
+            "properties": {
+                "job_id": {
+                    "type": "string"
+                },
+                "nuclei_findings": {
+                    "type": "integer"
+                },
+                "zap_findings": {
+                    "type": "integer"
                 }
             }
         },

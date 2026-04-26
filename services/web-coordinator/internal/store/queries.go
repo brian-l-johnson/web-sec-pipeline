@@ -250,6 +250,15 @@ func (s *Store) ResetJobForRetrigger(ctx context.Context, jobID uuid.UUID) error
 	return nil
 }
 
+// DeleteFindingsForJob removes all findings for a given job (used before re-parsing).
+func (s *Store) DeleteFindingsForJob(ctx context.Context, jobID uuid.UUID) error {
+	_, err := s.pool.Exec(ctx, `DELETE FROM web_findings WHERE job_id = $1`, jobID)
+	if err != nil {
+		return fmt.Errorf("delete findings: %w", err)
+	}
+	return nil
+}
+
 // InsertFinding inserts a single finding row.
 func (s *Store) InsertFinding(ctx context.Context, f WebFinding) error {
 	_, err := s.pool.Exec(ctx, `

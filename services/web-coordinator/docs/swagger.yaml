@@ -68,6 +68,15 @@ definitions:
       zap_status:
         type: string
     type: object
+  api.ReparseResponse:
+    properties:
+      job_id:
+        type: string
+      nuclei_findings:
+        type: integer
+      zap_findings:
+        type: integer
+    type: object
   api.submitJobRequest:
     properties:
       auth_config:
@@ -215,6 +224,45 @@ paths:
               type: string
             type: object
       summary: List findings for a scan job
+      tags:
+      - jobs
+  /jobs/{id}/reparse-findings:
+    post:
+      description: Deletes existing findings for the job and re-reads the ZAP and
+        Nuclei report files from disk. Useful when findings failed to store due to
+        a parsing bug. Does not re-run the scanners.
+      parameters:
+      - description: Job UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.ReparseResponse'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Re-parse on-disk scan reports
       tags:
       - jobs
   /jobs/{id}/retrigger:
