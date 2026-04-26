@@ -115,11 +115,11 @@ func (m *Manager) CreateZAPJob(ctx context.Context, jobID uuid.UUID, targetURL, 
 
 	job := m.buildJob(jobID, "zap", m.zapImage, env,
 		corev1.ResourceList{
-			corev1.ResourceMemory: resource.MustParse("512Mi"),
+			corev1.ResourceMemory: resource.MustParse("1Gi"),
 			corev1.ResourceCPU:    resource.MustParse("500m"),
 		},
 		corev1.ResourceList{
-			corev1.ResourceMemory: resource.MustParse("2Gi"),
+			corev1.ResourceMemory: resource.MustParse("4Gi"),
 			corev1.ResourceCPU:    resource.MustParse("2"),
 		},
 		3600,

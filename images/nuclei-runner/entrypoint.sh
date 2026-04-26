@@ -32,7 +32,11 @@ fi
 
 echo "[nuclei-runner] Starting scan (templates: ${TEMPLATE_ARG})..."
 
-exec nuclei \
+# Nuclei exits non-zero when individual templates error (SSL, DNS, etc.)
+# even when findings were successfully written. Treat the scan as successful
+# if the output file was created — the coordinator only cares about the JSONL.
+set +e
+nuclei \
     -u "${TARGET_URL}" \
     -t "${TEMPLATE_ARG}" \
     -severity low,medium,high,critical \
@@ -41,3 +45,12 @@ exec nuclei \
     -system-resolvers \
     -stats \
     -v
+NUCLEI_EXIT=$?
+set -e
+
+if [ -f "${OUTPUT_DIR}/nuclei.jsonl" ]; then
+    echo "[nuclei-runner] scan complete (nuclei exit=${NUCLEI_EXIT})"
+    exit 0
+fi
+echo "[nuclei-runner] ERROR: nuclei produced no output (exit=${NUCLEI_EXIT})" >&2
+exit $NUCLEI_EXIT
