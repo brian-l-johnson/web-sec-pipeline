@@ -1,7 +1,6 @@
 package pipeline
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -147,28 +146,21 @@ func nucleiSeverityNorm(s string) string {
 	}
 }
 
-// parseAndStoreNucleiFindings reads Nuclei's JSONL output and inserts findings.
-// Returns the number stored.
+// parseAndStoreNucleiFindings reads Nuclei's JSON array output (-json-export)
+// and inserts findings. Returns the number stored.
 func (o *Orchestrator) parseAndStoreNucleiFindings(ctx context.Context, jobID uuid.UUID, reportPath string) (int, error) {
-	f, err := os.Open(reportPath)
+	data, err := os.ReadFile(reportPath)
 	if err != nil {
-		return 0, fmt.Errorf("open nuclei report: %w", err)
+		return 0, fmt.Errorf("read nuclei report: %w", err)
 	}
-	defer f.Close()
+
+	var results []nucleiResult
+	if err := json.Unmarshal(data, &results); err != nil {
+		return 0, fmt.Errorf("parse nuclei report json: %w", err)
+	}
 
 	count := 0
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
-		}
-		var result nucleiResult
-		if err := json.Unmarshal([]byte(line), &result); err != nil {
-			log.Printf("orchestrator: skip malformed nuclei line (job=%s): %v", jobID, err)
-			continue
-		}
-
+	for _, result := range results {
 		finding := store.WebFinding{
 			ID:         uuid.New(),
 			JobID:      jobID,
@@ -188,9 +180,6 @@ func (o *Orchestrator) parseAndStoreNucleiFindings(ctx context.Context, jobID uu
 		} else {
 			count++
 		}
-	}
-	if err := scanner.Err(); err != nil {
-		return 0, fmt.Errorf("scan nuclei report: %w", err)
 	}
 	log.Printf("orchestrator: stored %d Nuclei findings for job %s", count, jobID)
 	return count, nil
