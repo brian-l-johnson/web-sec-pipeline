@@ -143,12 +143,12 @@ func (m *Manager) CreateNucleiJob(ctx context.Context, jobID uuid.UUID, targetUR
 
 	job := m.buildJob(jobID, "nuclei", m.nucleiImage, env,
 		corev1.ResourceList{
-			corev1.ResourceMemory: resource.MustParse("256Mi"),
-			corev1.ResourceCPU:    resource.MustParse("250m"),
+			corev1.ResourceMemory: resource.MustParse("512Mi"),
+			corev1.ResourceCPU:    resource.MustParse("500m"),
 		},
 		corev1.ResourceList{
-			corev1.ResourceMemory: resource.MustParse("1Gi"),
-			corev1.ResourceCPU:    resource.MustParse("1"),
+			corev1.ResourceMemory: resource.MustParse("2Gi"),
+			corev1.ResourceCPU:    resource.MustParse("2"),
 		},
 		3600,
 	)
@@ -161,7 +161,7 @@ func (m *Manager) CreateNucleiJob(ctx context.Context, jobID uuid.UUID, targetUR
 
 func (m *Manager) buildJob(jobID uuid.UUID, tool, image string, env []corev1.EnvVar, requests, limits corev1.ResourceList, deadlineSeconds int64) *batchv1.Job {
 	ttl := int32(3600)
-	backoff := int32(1)
+	backoff := int32(0) // no retries — a single failure immediately marks the Job Failed
 	runAsNonRoot := true
 	runAsUser := int64(1000)
 
@@ -242,16 +242,13 @@ func (m *Manager) WatchJobs(ctx context.Context, handler JobEventHandler) {
 	)
 
 	jobInformer := factory.Batch().V1().Jobs().Informer()
+	// Only use UpdateFunc, not AddFunc. AddFunc fires for all existing jobs when
+	// the informer cache populates on startup, which would re-fire OnJobFailed for
+	// jobs the orchestrator already processed. ReconcileRunningJobs handles startup
+	// state sync explicitly instead.
 	jobInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		UpdateFunc: func(_, newObj interface{}) {
 			job, ok := newObj.(*batchv1.Job)
-			if !ok {
-				return
-			}
-			m.handleJobUpdate(ctx, job, handler)
-		},
-		AddFunc: func(obj interface{}) {
-			job, ok := obj.(*batchv1.Job)
 			if !ok {
 				return
 			}
@@ -327,14 +324,18 @@ func (m *Manager) fetchPodLogs(ctx context.Context, job *batchv1.Job) string {
 }
 
 // ReconcileRunningJobs checks k8s state for jobs the DB thinks are running.
+// It only calls event handlers for jobs that have a terminal k8s condition.
+// If a tool's k8s Job is missing (e.g. TTL expired) it is skipped — it was
+// most likely already processed before the coordinator restarted.
 func (m *Manager) ReconcileRunningJobs(ctx context.Context, runningJobs []uuid.UUID, handler JobEventHandler) error {
 	for _, jobID := range runningJobs {
 		for _, tool := range []string{"crawl", "zap", "nuclei"} {
 			k8sJobName := fmt.Sprintf("web-%s-%s", tool, jobID)
 			k8sJob, err := m.clientset.BatchV1().Jobs(namespace).Get(ctx, k8sJobName, metav1.GetOptions{})
 			if err != nil {
-				log.Printf("reconcile: k8s job %s not found, marking failed: %v", k8sJobName, err)
-				handler.OnJobFailed(jobID, tool, "job not found after coordinator restart")
+				// Job not found — likely TTL-expired after it already completed/failed.
+				// Skip rather than spuriously marking it failed again.
+				log.Printf("reconcile: k8s job %s not found (likely TTL-expired), skipping", k8sJobName)
 				continue
 			}
 			for _, cond := range k8sJob.Status.Conditions {
