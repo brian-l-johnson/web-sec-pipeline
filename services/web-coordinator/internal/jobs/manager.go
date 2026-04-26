@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -37,10 +38,15 @@ type JobEventHandler interface {
 
 // Manager creates and watches Kubernetes Jobs for web scan tools.
 type Manager struct {
-	clientset     *kubernetes.Clientset
-	crawlerImage  string
-	zapImage      string
-	nucleiImage   string
+	clientset    *kubernetes.Clientset
+	crawlerImage string
+	zapImage     string
+	nucleiImage  string
+	// handled guards against duplicate event dispatch: the informer fires
+	// UpdateFunc on every k8s Job update (TTL controller, metadata patches, etc.)
+	// even after a Job has reached a terminal state. LoadOrStore ensures each
+	// job+tool pair is dispatched to the handler exactly once.
+	handled sync.Map // key: "<jobID>/<tool>", value: struct{}
 }
 
 // NewManager creates a Manager using in-cluster config and the given image refs.
@@ -276,14 +282,19 @@ func (m *Manager) handleJobUpdate(ctx context.Context, job *batchv1.Job, handler
 		return
 	}
 
+	key := jobID.String() + "/" + tool
 	for _, cond := range job.Status.Conditions {
 		if cond.Type == batchv1.JobComplete && cond.Status == corev1.ConditionTrue {
-			handler.OnJobComplete(jobID, tool)
+			if _, dup := m.handled.LoadOrStore(key, struct{}{}); !dup {
+				handler.OnJobComplete(jobID, tool)
+			}
 			return
 		}
 		if cond.Type == batchv1.JobFailed && cond.Status == corev1.ConditionTrue {
-			logs := m.fetchPodLogs(ctx, job)
-			handler.OnJobFailed(jobID, tool, logs)
+			if _, dup := m.handled.LoadOrStore(key, struct{}{}); !dup {
+				logs := m.fetchPodLogs(ctx, job)
+				handler.OnJobFailed(jobID, tool, logs)
+			}
 			return
 		}
 	}
@@ -338,12 +349,17 @@ func (m *Manager) ReconcileRunningJobs(ctx context.Context, runningJobs []uuid.U
 				log.Printf("reconcile: k8s job %s not found (likely TTL-expired), skipping", k8sJobName)
 				continue
 			}
+			key := jobID.String() + "/" + tool
 			for _, cond := range k8sJob.Status.Conditions {
 				if cond.Type == batchv1.JobComplete && cond.Status == corev1.ConditionTrue {
-					handler.OnJobComplete(jobID, tool)
+					if _, dup := m.handled.LoadOrStore(key, struct{}{}); !dup {
+						handler.OnJobComplete(jobID, tool)
+					}
 				} else if cond.Type == batchv1.JobFailed && cond.Status == corev1.ConditionTrue {
-					logs := m.fetchPodLogs(ctx, k8sJob)
-					handler.OnJobFailed(jobID, tool, logs)
+					if _, dup := m.handled.LoadOrStore(key, struct{}{}); !dup {
+						logs := m.fetchPodLogs(ctx, k8sJob)
+						handler.OnJobFailed(jobID, tool, logs)
+					}
 				}
 			}
 		}
