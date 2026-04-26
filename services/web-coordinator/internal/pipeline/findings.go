@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/google/uuid"
@@ -25,7 +26,7 @@ type zapReport struct {
 			Alert    string `json:"alert"`
 			RiskDesc string `json:"riskdesc"` // e.g. "High (Medium)"
 			Desc     string `json:"desc"`
-			CWEID    int    `json:"cweid"` // 0 when absent
+			CWEID    string `json:"cweid"` // "0" when absent; ZAP emits as a JSON string
 			Instances []struct {
 				URI      string `json:"uri"`
 				Evidence string `json:"evidence"`
@@ -85,9 +86,8 @@ func (o *Orchestrator) parseAndStoreZAPFindings(ctx context.Context, jobID uuid.
 				if ev := strings.TrimSpace(inst.Evidence); ev != "" {
 					f.Evidence = &ev
 				}
-				if alert.CWEID != 0 {
-					cwe := alert.CWEID
-					f.CWE = &cwe
+				if n, err := strconv.Atoi(alert.CWEID); err == nil && n > 0 {
+					f.CWE = &n
 				}
 
 				if err := o.store.InsertFinding(ctx, f); err != nil {
