@@ -1,0 +1,659 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Job Detail — Web Security Scanner</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:       #0f1117;
+    --surface:  #1a1d27;
+    --border:   #2a2d3a;
+    --text:     #e2e4ed;
+    --muted:    #7a7f99;
+    --accent:   #5b8dee;
+    --green:    #3ecf8e;
+    --red:      #e05c6a;
+    --yellow:   #f0b429;
+    --purple:   #a78bfa;
+    --radius:   8px;
+    --mono:     'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+    min-height: 100vh;
+  }
+
+  header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 14px 24px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  header h1 { font-size: 16px; font-weight: 600; letter-spacing: .3px; }
+  header .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 6px var(--green); }
+  header .sub { color: var(--muted); font-size: 12px; margin-left: auto; }
+
+  main { max-width: 1400px; margin: 0 auto; padding: 24px; }
+
+  a.back-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--muted);
+    text-decoration: none;
+    font-size: 13px;
+    margin-bottom: 18px;
+  }
+  a.back-link:hover { color: var(--text); }
+  a.back-link::before { content: '←'; }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    margin-bottom: 20px;
+  }
+
+  .job-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  .job-header-main { flex: 1; min-width: 0; }
+  .job-url {
+    font-family: var(--mono);
+    font-size: 15px;
+    word-break: break-all;
+    margin-bottom: 4px;
+  }
+  .job-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    color: var(--muted);
+    font-size: 12px;
+    margin-top: 12px;
+  }
+  .job-meta span { display: flex; gap: 5px; }
+  .job-meta strong { color: var(--text); font-weight: 500; }
+
+  .job-tools { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+
+  .tool-card {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-size: 12px;
+  }
+  .tool-card .tool-name {
+    font-weight: 700;
+    text-transform: uppercase;
+    font-size: 10px;
+    letter-spacing: .5px;
+  }
+  .tool-name-crawl  { color: var(--accent); }
+  .tool-name-zap    { color: var(--yellow); }
+  .tool-name-nuclei { color: var(--purple); }
+
+  .job-error {
+    margin-top: 12px;
+    padding: 10px 14px;
+    background: rgba(224,92,106,.08);
+    border: 1px solid rgba(224,92,106,.25);
+    border-radius: 6px;
+    font-size: 12px;
+    font-family: var(--mono);
+    color: var(--red);
+    word-break: break-all;
+  }
+
+  .job-actions { display: flex; gap: 8px; flex-shrink: 0; }
+
+  button {
+    cursor: pointer;
+    border: none;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 8px 18px;
+    transition: opacity .15s;
+  }
+  button:hover { opacity: .85; }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+  .btn-ghost    { background: transparent; border: 1px solid var(--border); color: var(--text); }
+  .btn-danger   { background: transparent; border: 1px solid var(--red); color: var(--red); }
+  .btn-sm       { padding: 5px 12px; font-size: 12px; font-weight: 500; }
+
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    border-radius: 4px;
+    padding: 2px 7px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .4px;
+  }
+  .badge::before { content: ''; width: 5px; height: 5px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
+  .badge-running  { color: var(--accent); background: rgba(91,141,238,.12); }
+  .badge-complete { color: var(--green);  background: rgba(62,207,142,.12); }
+  .badge-failed   { color: var(--red);    background: rgba(224,92,106,.12); }
+  .badge-pending  { color: var(--muted);  background: rgba(122,127,153,.12); }
+
+  .tool-status-badge {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    padding: 1px 5px;
+    border-radius: 3px;
+    letter-spacing: .3px;
+  }
+  .tsb-complete { color: var(--green);  background: rgba(62,207,142,.12); }
+  .tsb-failed   { color: var(--red);    background: rgba(224,92,106,.12); }
+  .tsb-running  { color: var(--accent); background: rgba(91,141,238,.12); }
+  .tsb-pending  { color: var(--muted);  background: rgba(122,127,153,.12); }
+
+  /* Findings table */
+  .section-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+  .section-header h2 {
+    font-size: 13px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .8px;
+    color: var(--muted);
+  }
+  .section-header .count {
+    background: var(--border);
+    border-radius: 12px;
+    padding: 1px 8px;
+    font-size: 11px;
+    color: var(--muted);
+  }
+
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; }
+  th {
+    text-align: left;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .6px;
+    color: var(--muted);
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  td {
+    padding: 9px 10px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+    font-size: 13px;
+  }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: rgba(255,255,255,.02); }
+
+  .sev {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    padding: 2px 6px;
+    border-radius: 3px;
+    white-space: nowrap;
+  }
+  .sev-critical { background: rgba(224,92,106,.25);  color: #ff8090; }
+  .sev-high     { background: rgba(240,130,30,.20);  color: #f08020; }
+  .sev-medium   { background: rgba(240,180,41,.15);  color: var(--yellow); }
+  .sev-low      { background: rgba(62,207,142,.12);  color: var(--green); }
+  .sev-info     { background: rgba(122,127,153,.12); color: var(--muted); }
+
+  .url-mono {
+    font-family: var(--mono);
+    font-size: 11px;
+    max-width: 260px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    display: block;
+  }
+  .desc-cell { max-width: 300px; font-size: 12px; color: var(--muted); }
+  .evidence-cell { max-width: 200px; font-size: 11px; font-family: var(--mono); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* Filter row */
+  tr.filter-row th { padding: 4px 10px 8px; }
+  .filter-input {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text);
+    font-size: 11px;
+    padding: 4px 7px;
+    width: 100%;
+    outline: none;
+    font-family: inherit;
+    text-transform: none;
+    letter-spacing: 0;
+    font-weight: 400;
+  }
+  .filter-input:focus { border-color: var(--accent); }
+
+  .no-findings {
+    text-align: center;
+    padding: 36px;
+    color: var(--muted);
+    font-style: italic;
+    font-size: 13px;
+  }
+
+  .toast {
+    position: fixed;
+    bottom: 24px; right: 24px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 12px 16px;
+    font-size: 13px;
+    box-shadow: 0 4px 20px rgba(0,0,0,.4);
+    z-index: 999;
+    display: none;
+    max-width: 340px;
+  }
+  .toast.show    { display: block; }
+  .toast.error   { border-color: var(--red);   color: var(--red); }
+  .toast.success { border-color: var(--green); color: var(--green); }
+
+  .spinner {
+    display: inline-block;
+    width: 10px; height: 10px;
+    border: 2px solid rgba(255,255,255,.2);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin .7s linear infinite;
+    vertical-align: middle;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  #loading-state { text-align: center; padding: 60px; color: var(--muted); }
+  #error-state   { text-align: center; padding: 60px; color: var(--red); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="dot"></div>
+  <h1>Web Security Scanner</h1>
+  <span class="sub" id="last-refresh"></span>
+</header>
+
+<main>
+  <a class="back-link" href="/ui/">All Jobs</a>
+
+  <div id="loading-state">Loading job…</div>
+  <div id="error-state"  style="display:none"></div>
+
+  <!-- Job detail card — hidden until loaded -->
+  <div id="job-card" class="card" style="display:none">
+    <div class="job-header">
+      <div class="job-header-main">
+        <div class="job-url" id="j-url"></div>
+        <div style="display:flex;align-items:center;gap:10px;margin-top:6px">
+          <span id="j-status-badge"></span>
+          <span id="j-id" style="font-family:var(--mono);font-size:11px;color:var(--muted)"></span>
+        </div>
+        <div class="job-meta">
+          <span><strong id="j-profile"></strong> profile</span>
+          <span>Submitted <strong id="j-submitted"></strong></span>
+          <span id="j-started-wrap" style="display:none">Started <strong id="j-started"></strong></span>
+          <span id="j-completed-wrap" style="display:none">Completed <strong id="j-completed"></strong></span>
+        </div>
+        <div class="job-tools" id="j-tools"></div>
+        <div class="job-error" id="j-error" style="display:none"></div>
+      </div>
+      <div class="job-actions">
+        <button class="btn-ghost btn-sm" id="reparse-btn" onclick="reparse()">Reparse Findings</button>
+        <button class="btn-danger btn-sm" id="retrigger-btn" onclick="retrigger()">Re-run</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Findings section — hidden until loaded -->
+  <div id="findings-section" style="display:none">
+    <div class="section-header">
+      <h2>Findings</h2>
+      <span class="count" id="finding-count">0</span>
+    </div>
+
+    <div class="card" style="padding:0;overflow:hidden">
+      <div class="table-wrap">
+        <table id="findings-table">
+          <thead>
+            <tr>
+              <th>Severity</th>
+              <th>Title</th>
+              <th>URL</th>
+              <th>Tool</th>
+              <th>CWE</th>
+              <th>Description</th>
+              <th>Evidence</th>
+            </tr>
+            <tr class="filter-row">
+              <th>
+                <select class="filter-input" id="ff-sev" onchange="applyFindingFilters()">
+                  <option value="">All</option>
+                  <option value="critical">Critical</option>
+                  <option value="high">High</option>
+                  <option value="medium">Medium</option>
+                  <option value="low">Low</option>
+                  <option value="info">Info</option>
+                </select>
+              </th>
+              <th><input class="filter-input" type="search" id="ff-title" placeholder="Filter title…" oninput="applyFindingFilters()"></th>
+              <th><input class="filter-input" type="search" id="ff-url"   placeholder="Filter URL…"   oninput="applyFindingFilters()"></th>
+              <th>
+                <select class="filter-input" id="ff-tool" onchange="applyFindingFilters()">
+                  <option value="">All</option>
+                  <option value="zap">ZAP</option>
+                  <option value="nuclei">Nuclei</option>
+                </select>
+              </th>
+              <th><input class="filter-input" type="search" id="ff-cwe"  placeholder="e.g. 79"       oninput="applyFindingFilters()"></th>
+              <th><input class="filter-input" type="search" id="ff-desc" placeholder="Filter desc…"  oninput="applyFindingFilters()"></th>
+              <th><input class="filter-input" type="search" id="ff-ev"   placeholder="Filter…"       oninput="applyFindingFilters()"></th>
+            </tr>
+          </thead>
+          <tbody id="findings-tbody">
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+'use strict';
+
+const jobId = new URLSearchParams(location.search).get('id');
+let jobData = null;
+let allFindings = [];
+let pollTimer = null;
+let prevToolStatuses = {};
+
+// ── Boot ──────────────────────────────────────────────────────────────────────
+
+if (!jobId) {
+  showError('No job ID in URL. Add ?id=<uuid> to the address bar.');
+} else {
+  loadJob().then(() => loadFindings());
+}
+
+// ── Job loading ───────────────────────────────────────────────────────────────
+
+async function loadJob() {
+  try {
+    const resp = await fetch(`/jobs/${jobId}`);
+    if (resp.status === 404) { showError('Job not found.'); return; }
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    jobData = await resp.json();
+    renderJob(jobData);
+    schedulePolling();
+  } catch (e) {
+    showError('Failed to load job: ' + e.message);
+  }
+}
+
+function renderJob(j) {
+  document.title = `${j.target_url} — Web Security Scanner`;
+
+  document.getElementById('loading-state').style.display = 'none';
+  document.getElementById('job-card').style.display = 'block';
+  document.getElementById('findings-section').style.display = 'block';
+
+  document.getElementById('j-url').textContent = j.target_url;
+  document.getElementById('j-id').textContent  = j.job_id;
+  document.getElementById('j-status-badge').innerHTML = badge(j.status);
+  document.getElementById('j-profile').textContent    = j.scan_profile;
+  document.getElementById('j-submitted').textContent  = relativeTime(j.submitted_at);
+  document.getElementById('j-submitted').title        = j.submitted_at;
+
+  if (j.started_at) {
+    document.getElementById('j-started-wrap').style.display = '';
+    document.getElementById('j-started').textContent = relativeTime(j.started_at);
+    document.getElementById('j-started').title = j.started_at;
+  }
+  if (j.completed_at) {
+    document.getElementById('j-completed-wrap').style.display = '';
+    document.getElementById('j-completed').textContent = relativeTime(j.completed_at);
+    document.getElementById('j-completed').title = j.completed_at;
+  }
+
+  document.getElementById('j-tools').innerHTML = [
+    toolCard('crawl',  j.crawl_status),
+    toolCard('zap',    j.zap_status),
+    toolCard('nuclei', j.nuclei_status),
+  ].join('');
+
+  const errEl = document.getElementById('j-error');
+  if (j.error) {
+    errEl.textContent = j.error;
+    errEl.style.display = 'block';
+  } else {
+    errEl.style.display = 'none';
+  }
+
+  const running = j.status === 'running';
+  document.getElementById('retrigger-btn').style.display = running ? 'none' : '';
+  document.getElementById('last-refresh').textContent =
+    'Updated ' + new Date().toLocaleTimeString();
+}
+
+// ── Polling ───────────────────────────────────────────────────────────────────
+
+function schedulePolling() {
+  clearInterval(pollTimer);
+  if (!jobData || (jobData.status !== 'running')) return;
+
+  prevToolStatuses = {
+    crawl:  jobData.crawl_status,
+    zap:    jobData.zap_status,
+    nuclei: jobData.nuclei_status,
+  };
+
+  pollTimer = setInterval(async () => {
+    try {
+      const resp = await fetch(`/jobs/${jobId}`);
+      if (!resp.ok) return;
+      const updated = await resp.json();
+      const toolsChanged =
+        prevToolStatuses.crawl  !== updated.crawl_status  ||
+        prevToolStatuses.zap    !== updated.zap_status    ||
+        prevToolStatuses.nuclei !== updated.nuclei_status;
+
+      jobData = updated;
+      renderJob(updated);
+
+      if (toolsChanged) loadFindings();
+
+      if (updated.status !== 'running') {
+        clearInterval(pollTimer);
+        loadFindings();
+      }
+    } catch { /* ignore transient errors */ }
+  }, 5000);
+}
+
+// ── Findings ──────────────────────────────────────────────────────────────────
+
+async function loadFindings() {
+  try {
+    const resp = await fetch(`/jobs/${jobId}/findings`);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    allFindings = data.findings || [];
+    applyFindingFilters();
+  } catch (e) {
+    document.getElementById('findings-tbody').innerHTML =
+      `<tr><td colspan="7" class="no-findings" style="color:var(--red)">Failed to load findings: ${esc(e.message)}</td></tr>`;
+  }
+}
+
+function applyFindingFilters() {
+  const sev   = document.getElementById('ff-sev').value;
+  const title = document.getElementById('ff-title').value.toLowerCase();
+  const url   = document.getElementById('ff-url').value.toLowerCase();
+  const tool  = document.getElementById('ff-tool').value;
+  const cwe   = document.getElementById('ff-cwe').value.toLowerCase().replace('cwe-', '');
+  const desc  = document.getElementById('ff-desc').value.toLowerCase();
+  const ev    = document.getElementById('ff-ev').value.toLowerCase();
+
+  const filtered = allFindings.filter(f => {
+    if (sev   && f.severity !== sev)                                           return false;
+    if (title && !f.title.toLowerCase().includes(title))                       return false;
+    if (url   && !(f.url   || '').toLowerCase().includes(url))                 return false;
+    if (tool  && f.tool !== tool)                                              return false;
+    if (cwe   && !(f.cwe ? String(f.cwe) : '').includes(cwe))                 return false;
+    if (desc  && !(f.description || '').toLowerCase().includes(desc))          return false;
+    if (ev    && !(f.evidence    || '').toLowerCase().includes(ev))            return false;
+    return true;
+  });
+
+  const countEl = document.getElementById('finding-count');
+  countEl.textContent = filtered.length < allFindings.length
+    ? `${filtered.length} of ${allFindings.length}`
+    : allFindings.length;
+
+  renderFindingRows(filtered);
+}
+
+function renderFindingRows(filtered) {
+  const tbody = document.getElementById('findings-tbody');
+
+  if (filtered.length === 0) {
+    const msg = allFindings.length === 0
+      ? 'No findings recorded yet.'
+      : 'No findings match the current filters.';
+    tbody.innerHTML = `<tr><td colspan="7" class="no-findings">${msg}</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = filtered.map(f => `<tr>
+    <td><span class="sev sev-${f.severity}">${f.severity}</span></td>
+    <td>${esc(f.title)}</td>
+    <td><span class="url-mono" title="${esc(f.url)}">${esc(f.url)}</span></td>
+    <td style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--muted)">${esc(f.tool)}</td>
+    <td>${f.cwe
+      ? `<a href="https://cwe.mitre.org/data/definitions/${f.cwe}.html" target="_blank" rel="noopener" style="color:var(--accent);font-size:12px">CWE-${f.cwe}</a>`
+      : `<span style="color:var(--muted)">—</span>`}</td>
+    <td class="desc-cell">${esc(f.description || '')}</td>
+    <td class="evidence-cell" title="${esc(f.evidence || '')}">${esc(f.evidence || '')}</td>
+  </tr>`).join('');
+}
+
+// ── Actions ───────────────────────────────────────────────────────────────────
+
+async function reparse() {
+  const btn = document.getElementById('reparse-btn');
+  btn.disabled = true;
+  btn.textContent = 'Reparsing…';
+  try {
+    const resp = await fetch(`/jobs/${jobId}/reparse-findings`, { method: 'POST' });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+    showToast(`Reparsed: ${data.zap_findings} ZAP + ${data.nuclei_findings} Nuclei findings`, 'success');
+    await loadFindings();
+  } catch (e) {
+    showToast('Reparse failed: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Reparse Findings';
+  }
+}
+
+async function retrigger() {
+  const btn = document.getElementById('retrigger-btn');
+  btn.disabled = true;
+  try {
+    const resp = await fetch(`/jobs/${jobId}/retrigger`, { method: 'POST' });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+    showToast('Job retriggered', 'success');
+    await loadJob();
+    await loadFindings();
+  } catch (e) {
+    showToast('Retrigger failed: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function badge(status) {
+  return `<span class="badge badge-${status}">${status}</span>`;
+}
+
+function toolCard(name, status) {
+  const statusCls = `tsb-${status}`;
+  const spinner = status === 'running' ? ' <span class="spinner"></span>' : '';
+  return `<div class="tool-card">
+    <span class="tool-name tool-name-${name}">${name}</span>
+    <span class="tool-status-badge ${statusCls}">${status}${spinner}</span>
+  </div>`;
+}
+
+function relativeTime(iso) {
+  if (!iso) return '—';
+  const diff = Date.now() - new Date(iso).getTime();
+  const s = Math.floor(diff / 1000);
+  if (s < 60)    return s + 's ago';
+  if (s < 3600)  return Math.floor(s/60) + 'm ago';
+  if (s < 86400) return Math.floor(s/3600) + 'h ago';
+  return Math.floor(s/86400) + 'd ago';
+}
+
+function showError(msg) {
+  document.getElementById('loading-state').style.display = 'none';
+  const el = document.getElementById('error-state');
+  el.textContent = msg;
+  el.style.display = 'block';
+}
+
+function showToast(msg, type = 'success') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = `toast show ${type}`;
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => t.classList.remove('show'), 4000);
+}
+
+function esc(str) {
+  return String(str ?? '')
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;');
+}
+</script>
+</body>
+</html>

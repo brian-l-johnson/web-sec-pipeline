@@ -84,10 +84,12 @@
   }
   button:hover { opacity: .85; }
   button:disabled { opacity: .4; cursor: not-allowed; }
-  .btn-primary { background: var(--accent); color: #fff; }
-  .btn-sm { padding: 4px 10px; font-size: 12px; font-weight: 500; }
-  .btn-ghost { background: transparent; border: 1px solid var(--border); color: var(--text); }
+  .btn-primary  { background: var(--accent); color: #fff; }
+  .btn-sm       { padding: 4px 10px; font-size: 12px; font-weight: 500; }
+  .btn-ghost    { background: transparent; border: 1px solid var(--border); color: var(--text); }
   .btn-danger-sm { background: transparent; border: 1px solid var(--red); color: var(--red); }
+
+  a.btn-ghost, a.btn-sm { text-decoration: none; display: inline-flex; align-items: center; }
 
   .section-header {
     display: flex;
@@ -118,8 +120,7 @@
     vertical-align: top;
   }
   tr:last-child td { border-bottom: none; }
-  tr.findings-row td { padding: 0; }
-  tr:hover:not(.findings-row) td { background: rgba(255,255,255,.02); }
+  tr:hover td { background: rgba(255,255,255,.02); }
 
   .url-cell {
     font-family: var(--mono);
@@ -149,7 +150,7 @@
   .badge::before { content: ''; width: 5px; height: 5px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
   .badge-running  { color: var(--accent); background: rgba(91,141,238,.12); }
   .badge-complete { color: var(--green);  background: rgba(62,207,142,.12); }
-  .badge-failed   { color: var(--red);    background: rgba(224,92,106,.12);  }
+  .badge-failed   { color: var(--red);    background: rgba(224,92,106,.12); }
   .badge-pending  { color: var(--muted);  background: rgba(122,127,153,.12); }
 
   .tool-pills { display: flex; gap: 4px; flex-wrap: wrap; }
@@ -164,49 +165,30 @@
   .pill-zap    { background: rgba(240,180,41,.15); color: var(--yellow); }
   .pill-nuclei { background: rgba(167,139,250,.15); color: var(--purple); }
   .pill-crawl  { background: rgba(91,141,238,.15);  color: var(--accent); }
-  .pill-ok     { opacity: 1; }
-  .pill-fail   { text-decoration: line-through; opacity: .5; }
-  .pill-pend   { opacity: .3; }
+  .pill-ok   { opacity: 1; }
+  .pill-fail { text-decoration: line-through; opacity: .5; }
+  .pill-pend { opacity: .3; }
 
-  .actions { display: flex; gap: 6px; }
+  .actions { display: flex; gap: 6px; align-items: center; }
 
-  /* Findings panel */
-  .findings-panel {
-    background: rgba(0,0,0,.3);
-    border-top: 1px solid var(--border);
-    padding: 16px 20px;
+  /* Filter row */
+  tr.filter-row th { padding: 4px 12px 8px; }
+  .filter-input {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text);
+    font-size: 11px;
+    padding: 4px 7px;
+    width: 100%;
+    outline: none;
+    font-family: inherit;
+    text-transform: none;
+    letter-spacing: 0;
+    font-weight: 400;
   }
-  .findings-panel h3 {
-    font-size: 12px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: .6px;
-    color: var(--muted);
-    margin-bottom: 12px;
-  }
-  .findings-table { width: 100%; border-collapse: collapse; }
-  .findings-table th {
-    font-size: 10px;
-    color: var(--muted);
-    padding: 5px 8px;
-    border-bottom: 1px solid var(--border);
-  }
-  .findings-table td {
-    font-size: 12px;
-    padding: 7px 8px;
-    border-bottom: 1px solid rgba(42,45,58,.5);
-    vertical-align: top;
-  }
-  .findings-table tr:last-child td { border-bottom: none; }
+  .filter-input:focus { border-color: var(--accent); }
 
-  .sev { font-size: 10px; font-weight: 700; text-transform: uppercase; padding: 2px 6px; border-radius: 3px; white-space: nowrap; }
-  .sev-critical { background: rgba(224,92,106,.25);  color: #ff8090; }
-  .sev-high     { background: rgba(240,130,30,.20);  color: #f08020; }
-  .sev-medium   { background: rgba(240,180,41,.15);  color: var(--yellow); }
-  .sev-low      { background: rgba(62,207,142,.12);  color: var(--green); }
-  .sev-info     { background: rgba(122,127,153,.12); color: var(--muted); }
-
-  .no-findings { color: var(--muted); font-size: 12px; font-style: italic; text-align: center; padding: 12px 0; }
   .empty-state { text-align: center; padding: 40px; color: var(--muted); }
   .empty-state p { margin-top: 8px; font-size: 12px; }
 
@@ -223,8 +205,8 @@
     display: none;
     max-width: 340px;
   }
-  .toast.show { display: block; }
-  .toast.error { border-color: var(--red); color: var(--red); }
+  .toast.show    { display: block; }
+  .toast.error   { border-color: var(--red);   color: var(--red); }
   .toast.success { border-color: var(--green); color: var(--green); }
 
   .spinner {
@@ -296,6 +278,55 @@
             <th>Submitted</th>
             <th>Actions</th>
           </tr>
+          <tr class="filter-row">
+            <th><input class="filter-input" type="search" id="f-target" placeholder="Filter target…" oninput="applyFilters()"></th>
+            <th>
+              <select class="filter-input" id="f-profile" onchange="applyFilters()">
+                <option value="">All profiles</option>
+                <option value="passive">Passive</option>
+                <option value="active">Active</option>
+                <option value="full">Full</option>
+              </select>
+            </th>
+            <th>
+              <select class="filter-input" id="f-status" onchange="applyFilters()">
+                <option value="">All statuses</option>
+                <option value="running">Running</option>
+                <option value="complete">Complete</option>
+                <option value="failed">Failed</option>
+                <option value="pending">Pending</option>
+              </select>
+            </th>
+            <th>
+              <select class="filter-input" id="f-crawl" onchange="applyFilters()">
+                <option value="">All</option>
+                <option value="running">Running</option>
+                <option value="complete">Complete</option>
+                <option value="failed">Failed</option>
+                <option value="pending">Pending</option>
+              </select>
+            </th>
+            <th>
+              <select class="filter-input" id="f-zap" onchange="applyFilters()">
+                <option value="">All</option>
+                <option value="running">Running</option>
+                <option value="complete">Complete</option>
+                <option value="failed">Failed</option>
+                <option value="pending">Pending</option>
+              </select>
+            </th>
+            <th>
+              <select class="filter-input" id="f-nuclei" onchange="applyFilters()">
+                <option value="">All</option>
+                <option value="running">Running</option>
+                <option value="complete">Complete</option>
+                <option value="failed">Failed</option>
+                <option value="pending">Pending</option>
+              </select>
+            </th>
+            <th><input class="filter-input" type="search" id="f-submitted" placeholder="e.g. 2026-04" oninput="applyFilters()"></th>
+            <th></th>
+          </tr>
         </thead>
         <tbody id="jobs-tbody">
           <tr><td colspan="8" class="empty-state">Loading…</td></tr>
@@ -311,8 +342,8 @@
 <script>
 'use strict';
 
-let expandedJobId = null;
 let jobs = [];
+let totalJobCount = 0;
 
 // ── Formatting helpers ────────────────────────────────────────────────────────
 
@@ -320,8 +351,8 @@ function relativeTime(iso) {
   if (!iso) return '—';
   const diff = Date.now() - new Date(iso).getTime();
   const s = Math.floor(diff / 1000);
-  if (s < 60)  return s + 's ago';
-  if (s < 3600) return Math.floor(s/60) + 'm ago';
+  if (s < 60)    return s + 's ago';
+  if (s < 3600)  return Math.floor(s/60) + 'm ago';
   if (s < 86400) return Math.floor(s/3600) + 'h ago';
   return Math.floor(s/86400) + 'd ago';
 }
@@ -338,122 +369,78 @@ function pillStatus(status) {
 }
 
 function toolPill(label, status) {
-  const cls = ['pill', `pill-${label.toLowerCase()}`, `pill-${pillStatus(status)}`].join(' ');
+  const cls = `pill pill-${label.toLowerCase()} pill-${pillStatus(status)}`;
   const icon = status === 'running' ? ' <span class="spinner"></span>' : '';
   return `<span class="${cls}" title="${label}: ${status}">${label}${icon}</span>`;
 }
 
-function sevBadge(sev) {
-  return `<span class="sev sev-${sev}">${sev}</span>`;
-}
-
-function shortId(id) {
-  return id.slice(0, 8);
-}
+function shortId(id) { return id.slice(0, 8); }
 
 // ── Jobs rendering ─────────────────────────────────────────────────────────
 
 function renderJobs(data) {
   jobs = data.jobs || [];
-  const tbody = document.getElementById('jobs-tbody');
-  document.getElementById('job-count').textContent = data.total ?? jobs.length;
+  totalJobCount = data.total ?? jobs.length;
+  applyFilters();
+}
 
-  if (jobs.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="8" class="empty-state">
-      <div>No scans yet</div>
-      <p>Submit a target URL above to start your first scan.</p>
-    </td></tr>`;
-    return;
-  }
+function applyFilters() {
+  const target    = document.getElementById('f-target').value.toLowerCase();
+  const profile   = document.getElementById('f-profile').value;
+  const status    = document.getElementById('f-status').value;
+  const crawl     = document.getElementById('f-crawl').value;
+  const zap       = document.getElementById('f-zap').value;
+  const nuclei    = document.getElementById('f-nuclei').value;
+  const submitted = document.getElementById('f-submitted').value.toLowerCase();
 
-  const rows = jobs.flatMap(j => {
-    const isExpanded = expandedJobId === j.job_id;
-    const row = `<tr data-id="${j.job_id}">
-      <td>
-        <div class="url-cell" title="${esc(j.target_url)}">${esc(j.target_url)}</div>
-        <div class="job-id">${shortId(j.job_id)}</div>
-      </td>
-      <td>${esc(j.scan_profile)}</td>
-      <td>${badge(j.status)}</td>
-      <td>${toolPill('Crawl', j.crawl_status)}</td>
-      <td>${toolPill('ZAP', j.zap_status)}</td>
-      <td>${toolPill('Nuclei', j.nuclei_status)}</td>
-      <td title="${esc(j.submitted_at)}">${relativeTime(j.submitted_at)}</td>
-      <td>
-        <div class="actions">
-          <button class="btn-ghost btn-sm" onclick="toggleFindings('${j.job_id}')">
-            ${isExpanded ? 'Hide' : 'Findings'}
-          </button>
-          ${j.status !== 'running' ? `<button class="btn-danger-sm btn-sm" onclick="retrigger('${j.job_id}')">Re-run</button>` : ''}
-        </div>
-      </td>
-    </tr>`;
-
-    const findingsRow = isExpanded
-      ? `<tr class="findings-row" id="findings-row-${j.job_id}"><td colspan="8"><div class="findings-panel" id="findings-panel-${j.job_id}"><p style="color:var(--muted);font-size:12px">Loading findings…</p></div></td></tr>`
-      : '';
-
-    return row + findingsRow;
+  const filtered = jobs.filter(j => {
+    if (target    && !j.target_url.toLowerCase().includes(target))         return false;
+    if (profile   && j.scan_profile !== profile)                           return false;
+    if (status    && j.status !== status)                                  return false;
+    if (crawl     && j.crawl_status !== crawl)                             return false;
+    if (zap       && j.zap_status !== zap)                                 return false;
+    if (nuclei    && j.nuclei_status !== nuclei)                           return false;
+    if (submitted && !j.submitted_at.toLowerCase().includes(submitted))    return false;
+    return true;
   });
 
-  tbody.innerHTML = rows.join('');
+  const countEl = document.getElementById('job-count');
+  countEl.textContent = filtered.length < totalJobCount
+    ? `${filtered.length} of ${totalJobCount}`
+    : totalJobCount;
 
-  // Reload findings for the currently expanded job.
-  if (expandedJobId) {
-    const job = jobs.find(j => j.job_id === expandedJobId);
-    if (job) loadFindings(expandedJobId);
-    else expandedJobId = null;
-  }
+  renderJobRows(filtered);
 }
 
-// ── Findings ────────────────────────────────────────────────────────────────
+function renderJobRows(filtered) {
+  const tbody = document.getElementById('jobs-tbody');
 
-async function toggleFindings(jobId) {
-  if (expandedJobId === jobId) {
-    expandedJobId = null;
-    await fetchJobs();
+  if (filtered.length === 0) {
+    const msg = jobs.length === 0
+      ? `<div>No scans yet</div><p>Submit a target URL above to start your first scan.</p>`
+      : `<div>No jobs match the current filters.</div>`;
+    tbody.innerHTML = `<tr><td colspan="8" class="empty-state">${msg}</td></tr>`;
     return;
   }
-  expandedJobId = jobId;
-  await fetchJobs();
-}
 
-async function loadFindings(jobId) {
-  const panel = document.getElementById(`findings-panel-${jobId}`);
-  if (!panel) return;
-
-  try {
-    const resp = await fetch(`/jobs/${jobId}/findings`);
-    const data = await resp.json();
-    const findings = data.findings || [];
-
-    if (findings.length === 0) {
-      panel.innerHTML = `<h3>Findings</h3><p class="no-findings">No findings recorded yet.</p>`;
-      return;
-    }
-
-    const rows = findings.map(f => `<tr>
-      <td>${sevBadge(f.severity)}</td>
-      <td>${esc(f.title)}</td>
-      <td style="font-family:var(--mono);font-size:11px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(f.url)}">${esc(f.url)}</td>
-      <td><span style="font-size:11px;text-transform:uppercase;font-weight:600;color:var(--muted)">${esc(f.tool)}</span></td>
-      ${f.cwe ? `<td><a href="https://cwe.mitre.org/data/definitions/${f.cwe}.html" target="_blank" style="color:var(--accent);font-size:11px">CWE-${f.cwe}</a></td>` : '<td style="color:var(--muted)">—</td>'}
-      <td style="font-size:11px;color:var(--muted);max-width:300px">${esc(f.description || '')}</td>
-    </tr>`).join('');
-
-    panel.innerHTML = `
-      <h3>Findings (${findings.length})</h3>
-      <div style="overflow-x:auto">
-      <table class="findings-table">
-        <thead><tr>
-          <th>Severity</th><th>Title</th><th>URL</th><th>Tool</th><th>CWE</th><th>Description</th>
-        </tr></thead>
-        <tbody>${rows}</tbody>
-      </table>
-      </div>`;
-  } catch (e) {
-    panel.innerHTML = `<p style="color:var(--red);font-size:12px">Failed to load findings: ${esc(e.message)}</p>`;
-  }
+  tbody.innerHTML = filtered.map(j => `<tr>
+    <td>
+      <div class="url-cell" title="${esc(j.target_url)}">${esc(j.target_url)}</div>
+      <div class="job-id">${shortId(j.job_id)}</div>
+    </td>
+    <td>${esc(j.scan_profile)}</td>
+    <td>${badge(j.status)}</td>
+    <td>${toolPill('Crawl', j.crawl_status)}</td>
+    <td>${toolPill('ZAP', j.zap_status)}</td>
+    <td>${toolPill('Nuclei', j.nuclei_status)}</td>
+    <td title="${esc(j.submitted_at)}">${relativeTime(j.submitted_at)}</td>
+    <td>
+      <div class="actions">
+        <a class="btn-ghost btn-sm" href="/ui/job.html?id=${j.job_id}" target="_blank" rel="noopener">View</a>
+        ${j.status !== 'running' ? `<button class="btn-danger-sm btn-sm" onclick="retrigger('${j.job_id}')">Re-run</button>` : ''}
+      </div>
+    </td>
+  </tr>`).join('');
 }
 
 // ── Fetch jobs ───────────────────────────────────────────────────────────────
@@ -466,7 +453,7 @@ async function fetchJobs() {
     renderJobs(data);
     document.getElementById('last-refresh').textContent =
       'Updated ' + new Date().toLocaleTimeString();
-  } catch (e) {
+  } catch {
     document.getElementById('refresh-status').textContent = 'Refresh error — retrying…';
   }
 }
@@ -474,9 +461,9 @@ async function fetchJobs() {
 // ── Submit job ───────────────────────────────────────────────────────────────
 
 async function submitJob() {
-  const urlVal     = document.getElementById('url').value.trim();
-  const profile    = document.getElementById('profile').value;
-  const scopeRaw   = document.getElementById('scope').value.trim();
+  const urlVal   = document.getElementById('url').value.trim();
+  const profile  = document.getElementById('profile').value;
+  const scopeRaw = document.getElementById('scope').value.trim();
 
   if (!urlVal) { showToast('Please enter a target URL.', 'error'); return; }
 
@@ -504,7 +491,7 @@ async function submitJob() {
     const data = await resp.json();
     if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
 
-    document.getElementById('url').value = '';
+    document.getElementById('url').value  = '';
     document.getElementById('scope').value = '';
     showToast(`Scan started — job ${shortId(data.job_id)}`, 'success');
     await fetchJobs();
@@ -553,7 +540,6 @@ function esc(str) {
 fetchJobs();
 setInterval(fetchJobs, 5000);
 
-// Submit on Enter in the URL field.
 document.getElementById('url').addEventListener('keydown', e => {
   if (e.key === 'Enter') submitJob();
 });
