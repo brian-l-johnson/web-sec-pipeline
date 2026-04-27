@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/brian-l-johnson/web-sec-pipeline/services/web-coordinator/internal/jobs"
 	"github.com/brian-l-johnson/web-sec-pipeline/services/web-coordinator/internal/store"
 )
 
@@ -121,8 +122,14 @@ func (m *mockReparserer) ReparseFindings(_ context.Context, _ uuid.UUID) (int, i
 	return m.zapFindings, m.nucleiFindings, m.err
 }
 
+type mockLogStreamer struct{}
+
+func (m *mockLogStreamer) StreamJobLogs(_ context.Context, _ uuid.UUID, out chan<- jobs.LogLine) {
+	close(out)
+}
+
 func newTestHandler(s Storer, r JobRetriggerer) *Handler {
-	return NewHandler(s, r, &mockSubmitter{}, &mockReparserer{})
+	return NewHandler(s, r, &mockSubmitter{}, &mockReparserer{}, &mockLogStreamer{})
 }
 
 func doRequest(t *testing.T, h *Handler, method, path string) *httptest.ResponseRecorder {
@@ -383,7 +390,7 @@ func TestReparseHandler_Success(t *testing.T) {
 	s.jobs[job.ID] = job
 
 	mux := http.NewServeMux()
-	h := NewHandler(s, &mockRetriggerer{}, &mockSubmitter{}, &mockReparserer{zapFindings: 3, nucleiFindings: 2})
+	h := NewHandler(s, &mockRetriggerer{}, &mockSubmitter{}, &mockReparserer{zapFindings: 3, nucleiFindings: 2}, &mockLogStreamer{})
 	h.RegisterRoutes(mux)
 
 	req := httptest.NewRequest(http.MethodPost, "/jobs/"+job.ID.String()+"/reparse-findings", nil)
@@ -408,7 +415,7 @@ func TestReparseHandler_Success(t *testing.T) {
 
 func TestReparseHandler_JobNotFound(t *testing.T) {
 	mux := http.NewServeMux()
-	h := NewHandler(newMockStore(), &mockRetriggerer{}, &mockSubmitter{}, &mockReparserer{})
+	h := NewHandler(newMockStore(), &mockRetriggerer{}, &mockSubmitter{}, &mockReparserer{}, &mockLogStreamer{})
 	h.RegisterRoutes(mux)
 
 	req := httptest.NewRequest(http.MethodPost, "/jobs/"+uuid.NewString()+"/reparse-findings", nil)
@@ -422,7 +429,7 @@ func TestReparseHandler_JobNotFound(t *testing.T) {
 
 func TestReparseHandler_InvalidID(t *testing.T) {
 	mux := http.NewServeMux()
-	h := NewHandler(newMockStore(), &mockRetriggerer{}, &mockSubmitter{}, &mockReparserer{})
+	h := NewHandler(newMockStore(), &mockRetriggerer{}, &mockSubmitter{}, &mockReparserer{}, &mockLogStreamer{})
 	h.RegisterRoutes(mux)
 
 	req := httptest.NewRequest(http.MethodPost, "/jobs/not-a-uuid/reparse-findings", nil)
@@ -434,13 +441,51 @@ func TestReparseHandler_InvalidID(t *testing.T) {
 	}
 }
 
+func TestLogsHandler_OK(t *testing.T) {
+	s := newMockStore()
+	job := makeJob("running")
+	s.jobs[job.ID] = job
+
+	mux := http.NewServeMux()
+	h := NewHandler(s, &mockRetriggerer{}, &mockSubmitter{}, &mockReparserer{}, &mockLogStreamer{})
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodGet, "/jobs/"+job.ID.String()+"/logs", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "text/event-stream" {
+		t.Errorf("Content-Type = %q, want text/event-stream", ct)
+	}
+	if !strings.Contains(rec.Body.String(), `"done":true`) {
+		t.Errorf("body missing done event: %s", rec.Body.String())
+	}
+}
+
+func TestLogsHandler_NotFound(t *testing.T) {
+	mux := http.NewServeMux()
+	h := NewHandler(newMockStore(), &mockRetriggerer{}, &mockSubmitter{}, &mockReparserer{}, &mockLogStreamer{})
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodGet, "/jobs/"+uuid.NewString()+"/logs", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", rec.Code)
+	}
+}
+
 func TestReparseHandler_ReparserError(t *testing.T) {
 	s := newMockStore()
 	job := makeJob("complete")
 	s.jobs[job.ID] = job
 
 	mux := http.NewServeMux()
-	h := NewHandler(s, &mockRetriggerer{}, &mockSubmitter{}, &mockReparserer{err: fmt.Errorf("db error")})
+	h := NewHandler(s, &mockRetriggerer{}, &mockSubmitter{}, &mockReparserer{err: fmt.Errorf("db error")}, &mockLogStreamer{})
 	h.RegisterRoutes(mux)
 
 	req := httptest.NewRequest(http.MethodPost, "/jobs/"+job.ID.String()+"/reparse-findings", nil)

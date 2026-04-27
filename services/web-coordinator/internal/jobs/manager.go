@@ -1,6 +1,7 @@
 package jobs
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -365,4 +367,123 @@ func (m *Manager) ReconcileRunningJobs(ctx context.Context, runningJobs []uuid.U
 		}
 	}
 	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Log streaming
+// ---------------------------------------------------------------------------
+
+// LogLine is one line of output from a scan pod, tagged with the tool name.
+type LogLine struct {
+	Tool string `json:"tool"`
+	Text string `json:"text"`
+}
+
+// logPollInterval is how often we retry when a pod/job hasn't appeared yet.
+const logPollInterval = 3 * time.Second
+
+// logMaxWait is the longest we'll wait for a tool's k8s Job to be created
+// (worst case: crawl runs its full 30-min deadline before ZAP/Nuclei start).
+const logMaxWait = 90 * time.Minute
+
+// StreamJobLogs fans out to all three scan tools in parallel, sending each
+// log line to out. The channel is closed when all tools have finished (or the
+// context is cancelled). Callers must drain out until it is closed.
+func (m *Manager) StreamJobLogs(ctx context.Context, jobID uuid.UUID, out chan<- LogLine) {
+	defer close(out)
+	var wg sync.WaitGroup
+	for _, tool := range []string{"crawl", "zap", "nuclei"} {
+		wg.Add(1)
+		go func(t string) {
+			defer wg.Done()
+			m.streamToolLogs(ctx, jobID, t, out)
+		}(tool)
+	}
+	wg.Wait()
+}
+
+// streamToolLogs waits for the k8s Job for tool to exist, then streams its
+// pod logs into out. Returns when logs are exhausted or ctx is cancelled.
+func (m *Manager) streamToolLogs(ctx context.Context, jobID uuid.UUID, tool string, out chan<- LogLine) {
+	jobName := fmt.Sprintf("web-%s-%s", tool, jobID)
+	deadline := time.Now().Add(logMaxWait)
+
+	// Wait for the k8s Job to be created.
+	var k8sJob *batchv1.Job
+	for {
+		j, err := m.clientset.BatchV1().Jobs(namespace).Get(ctx, jobName, metav1.GetOptions{})
+		if err == nil {
+			k8sJob = j
+			break
+		}
+		if !k8serrors.IsNotFound(err) {
+			return // unexpected API error
+		}
+		if time.Now().After(deadline) {
+			send(ctx, out, LogLine{Tool: "system", Text: fmt.Sprintf("[%s] logs unavailable — job not found within timeout", tool)})
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(logPollInterval):
+		}
+	}
+
+	// Wait for a pod to be scheduled for the job.
+	selector := labels.SelectorFromSet(k8sJob.Spec.Selector.MatchLabels)
+	podDeadline := time.Now().Add(2 * time.Minute)
+	var podName, containerName string
+	for {
+		pods, err := m.clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
+			LabelSelector: selector.String(),
+		})
+		if err == nil && len(pods.Items) > 0 {
+			pod := pods.Items[0]
+			podName = pod.Name
+			if len(pod.Spec.Containers) > 0 {
+				containerName = pod.Spec.Containers[0].Name
+			}
+			break
+		}
+		if time.Now().After(podDeadline) {
+			send(ctx, out, LogLine{Tool: "system", Text: fmt.Sprintf("[%s] pod not found", tool)})
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(2 * time.Second):
+		}
+	}
+
+	// Stream the pod logs, following until the container exits.
+	req := m.clientset.CoreV1().Pods(namespace).GetLogs(podName, &corev1.PodLogOptions{
+		Container: containerName,
+		Follow:    true,
+	})
+	stream, err := req.Stream(ctx)
+	if err != nil {
+		return
+	}
+	defer stream.Close()
+
+	sc := bufio.NewScanner(stream)
+	sc.Buffer(make([]byte, 256*1024), 256*1024) // ZAP can emit very long lines
+	for sc.Scan() {
+		if !send(ctx, out, LogLine{Tool: tool, Text: sc.Text()}) {
+			return
+		}
+	}
+}
+
+// send writes a LogLine to out, respecting context cancellation.
+// Returns false if the context was cancelled before the send succeeded.
+func send(ctx context.Context, out chan<- LogLine, line LogLine) bool {
+	select {
+	case out <- line:
+		return true
+	case <-ctx.Done():
+		return false
+	}
 }

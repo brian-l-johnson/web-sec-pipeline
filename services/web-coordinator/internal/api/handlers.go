@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -13,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/brian-l-johnson/web-sec-pipeline/services/web-coordinator/internal/jobs"
 	"github.com/brian-l-johnson/web-sec-pipeline/services/web-coordinator/internal/store"
 )
 
@@ -40,17 +42,23 @@ type FindingsReparserer interface {
 	ReparseFindings(ctx context.Context, jobID uuid.UUID) (zapFindings, nucleiFindings int, err error)
 }
 
+// JobLogStreamer streams scan pod log lines for a job over a channel.
+type JobLogStreamer interface {
+	StreamJobLogs(ctx context.Context, jobID uuid.UUID, out chan<- jobs.LogLine)
+}
+
 // Handler holds shared dependencies for the HTTP handlers.
 type Handler struct {
 	store       Storer
 	retriggerer JobRetriggerer
 	submitter   JobSubmitter
 	reparserer  FindingsReparserer
+	logStreamer  JobLogStreamer
 }
 
 // NewHandler creates a Handler.
-func NewHandler(s Storer, r JobRetriggerer, sub JobSubmitter, rep FindingsReparserer) *Handler {
-	return &Handler{store: s, retriggerer: r, submitter: sub, reparserer: rep}
+func NewHandler(s Storer, r JobRetriggerer, sub JobSubmitter, rep FindingsReparserer, ls JobLogStreamer) *Handler {
+	return &Handler{store: s, retriggerer: r, submitter: sub, reparserer: rep, logStreamer: ls}
 }
 
 // RegisterRoutes wires all routes into mux.
@@ -60,6 +68,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /jobs", h.SubmitJobHandler)
 	mux.HandleFunc("GET /jobs/{id}", h.GetJobHandler)
 	mux.HandleFunc("GET /jobs/{id}/findings", h.ListFindingsHandler)
+	mux.HandleFunc("GET /jobs/{id}/logs", h.LogsHandler)
 	mux.HandleFunc("POST /jobs/{id}/reparse-findings", h.ReparseHandler)
 	mux.HandleFunc("POST /jobs/{id}/retrigger", h.RetriggerHandler)
 }
@@ -386,6 +395,63 @@ func (h *Handler) ListFindingsHandler(w http.ResponseWriter, r *http.Request) {
 		resp.Findings[i] = findingToResponse(&findings[i])
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// LogsHandler handles GET /jobs/{id}/logs as a Server-Sent Events stream.
+// Each event is a JSON object: {"tool":"zap","text":"..."}.
+// A final {"done":true} event is sent when all tool logs have been exhausted.
+//
+// @Summary      Stream scan pod logs
+// @Description  Server-Sent Events stream of log lines from the crawl, ZAP, and Nuclei pods. Follows pods until they exit; waits up to 90 minutes for tools that haven't started yet.
+// @Tags         jobs
+// @Produce      text/event-stream
+// @Param        id  path  string  true  "Job UUID"
+// @Success      200
+// @Failure      400  {object}  map[string]string
+// @Failure      404  {object}  map[string]string
+// @Router       /jobs/{id}/logs [get]
+func (h *Handler) LogsHandler(w http.ResponseWriter, r *http.Request) {
+	jobID, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid job ID")
+		return
+	}
+
+	if _, err := h.store.GetJob(r.Context(), jobID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "job not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "getting job: "+err.Error())
+		return
+	}
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "streaming not supported")
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no") // disable nginx proxy buffering
+	w.WriteHeader(http.StatusOK)
+	flusher.Flush()
+
+	lineCh := make(chan jobs.LogLine, 64)
+	go h.logStreamer.StreamJobLogs(r.Context(), jobID, lineCh)
+
+	enc := json.NewEncoder(w)
+	for line := range lineCh {
+		fmt.Fprint(w, "data: ")
+		enc.Encode(line) // appends \n
+		fmt.Fprint(w, "\n")
+		flusher.Flush()
+	}
+
+	fmt.Fprint(w, "data: {\"done\":true}\n\n")
+	flusher.Flush()
 }
 
 // ReparseHandler handles POST /jobs/{id}/reparse-findings.

@@ -214,6 +214,50 @@ const docTemplate = `{
                 }
             }
         },
+        "/jobs/{id}/logs": {
+            "get": {
+                "description": "Server-Sent Events stream of log lines from the crawl, ZAP, and Nuclei pods. Follows pods until they exit; waits up to 90 minutes for tools that haven't started yet.",
+                "produces": [
+                    "text/event-stream"
+                ],
+                "tags": [
+                    "jobs"
+                ],
+                "summary": "Stream scan pod logs",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Job UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/jobs/{id}/reparse-findings": {
             "post": {
                 "description": "Deletes existing findings for the job and re-reads the ZAP and Nuclei report files from disk. Useful when findings failed to store due to a parsing bug. Does not re-run the scanners.",
