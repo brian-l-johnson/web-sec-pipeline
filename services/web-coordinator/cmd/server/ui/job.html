@@ -667,11 +667,16 @@ async function retrigger() {
 
 // ── Log streaming ─────────────────────────────────────────────────────────────
 
-let logSource = null;
+const MAX_LOG_LINES = 2000; // cap DOM nodes so the page stays responsive
+
+let logSource    = null;
+let logBuffer    = [];   // lines waiting to be flushed to the DOM
+let logFlushTimer = null;
+let logLineCount  = 0;
 
 function toggleLogs() {
-  const panel  = document.getElementById('logs-panel');
-  const btn    = document.getElementById('logs-toggle-btn');
+  const panel = document.getElementById('logs-panel');
+  const btn   = document.getElementById('logs-toggle-btn');
   if (panel.style.display === 'none') {
     panel.style.display = 'block';
     btn.textContent = 'Disconnect';
@@ -685,7 +690,7 @@ function toggleLogs() {
 
 function connectLogs() {
   disconnectLogs();
-  document.getElementById('log-output').innerHTML = '';
+  clearLogs();
   setLogStatus('Connecting…');
 
   logSource = new EventSource(`/jobs/${jobId}/logs`);
@@ -695,41 +700,75 @@ function connectLogs() {
   logSource.onmessage = (e) => {
     const data = JSON.parse(e.data);
     if (data.done) {
+      flushLogBuffer();
       setLogStatus('Stream ended');
+      stopFlushTimer();
       logSource.close();
       logSource = null;
       document.getElementById('logs-toggle-btn').textContent = 'Reconnect';
       return;
     }
-    appendLogLine(data.tool, data.text);
+    logBuffer.push(data);
   };
 
   logSource.onerror = () => {
+    flushLogBuffer();
     setLogStatus('Disconnected');
+    stopFlushTimer();
     if (logSource) { logSource.close(); logSource = null; }
     document.getElementById('logs-toggle-btn').textContent = 'Reconnect';
   };
+
+  // Flush buffered lines to the DOM at most every 100 ms so the main
+  // thread isn't hammered on high-volume output (ZAP/Nuclei can be noisy).
+  logFlushTimer = setInterval(flushLogBuffer, 100);
 }
 
 function disconnectLogs() {
+  stopFlushTimer();
   if (logSource) { logSource.close(); logSource = null; }
   setLogStatus('');
 }
 
-function clearLogs() {
-  document.getElementById('log-output').innerHTML = '';
+function stopFlushTimer() {
+  clearInterval(logFlushTimer);
+  logFlushTimer = null;
 }
 
-function appendLogLine(tool, text) {
+function flushLogBuffer() {
+  if (logBuffer.length === 0) return;
+
   const out = document.getElementById('log-output');
-  const span = document.createElement('span');
-  span.className = `log-line-${tool}`;
-  span.textContent = `[${tool}] ${text}\n`;
-  out.appendChild(span);
-  // Auto-scroll only when already near the bottom.
-  if (out.scrollHeight - out.scrollTop - out.clientHeight < 80) {
-    out.scrollTop = out.scrollHeight;
+  if (!out) return;
+
+  const atBottom = out.scrollHeight - out.scrollTop - out.clientHeight < 80;
+
+  // Build all new nodes in a fragment — one reflow instead of N.
+  const frag = document.createDocumentFragment();
+  for (const { tool, text } of logBuffer) {
+    const span = document.createElement('span');
+    span.className = `log-line-${tool}`;
+    span.textContent = `[${tool}] ${text}\n`;
+    frag.appendChild(span);
+    logLineCount++;
   }
+  logBuffer = [];
+  out.appendChild(frag);
+
+  // Trim oldest lines to stay under the cap.
+  while (logLineCount > MAX_LOG_LINES) {
+    out.removeChild(out.firstChild);
+    logLineCount--;
+  }
+
+  if (atBottom) out.scrollTop = out.scrollHeight;
+}
+
+function clearLogs() {
+  const out = document.getElementById('log-output');
+  if (out) out.innerHTML = '';
+  logBuffer   = [];
+  logLineCount = 0;
 }
 
 function setLogStatus(msg) {
