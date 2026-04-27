@@ -266,6 +266,52 @@
     font-size: 13px;
   }
 
+  /* View toggle */
+  .view-toggle { display: flex; gap: 2px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 2px; margin-left: auto; }
+  .view-btn { background: transparent; border: none; color: var(--muted); font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 4px; cursor: pointer; transition: color .15s; }
+  .view-btn.active { background: var(--surface); color: var(--text); }
+  .view-btn:hover:not(.active) { color: var(--text); }
+
+  /* Findings layout — list vs tree */
+  #findings-layout {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    background: var(--surface);
+  }
+  #findings-layout.tree-view { display: flex; }
+  .tree-panel {
+    display: none;
+    width: 260px;
+    min-width: 140px;
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+    max-height: 580px;
+    flex-shrink: 0;
+  }
+  #findings-layout.tree-view .tree-panel { display: block; }
+  #findings-layout.tree-view #findings-table-wrap { flex: 1; overflow: auto; max-height: 580px; }
+
+  /* Tree nodes */
+  .tree-list, .tree-children { list-style: none; padding: 0; margin: 0; }
+  .tree-children { padding-left: 14px; }
+  .tree-node > .tree-children { display: none; }
+  .tree-node.open > .tree-children { display: block; }
+  .tree-row {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 5px 10px 5px 8px;
+    cursor: pointer;
+    border-left: 2px solid transparent;
+    user-select: none;
+  }
+  .tree-row:hover { background: rgba(255,255,255,.04); }
+  .tree-row.selected { background: rgba(91,141,238,.1); border-left-color: var(--accent); }
+  .tree-toggle { font-size: 9px; width: 10px; color: var(--muted); flex-shrink: 0; }
+  .tree-label { flex: 1; font-family: var(--mono); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tree-count { font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 3px; flex-shrink: 0; }
+
   /* Log panel */
   .log-toolbar {
     display: flex;
@@ -390,10 +436,19 @@
     <div class="section-header">
       <h2>Findings</h2>
       <span class="count" id="finding-count">0</span>
+      <div class="view-toggle">
+        <button id="btn-list" class="view-btn active" onclick="setView('list')">List</button>
+        <button id="btn-tree" class="view-btn"        onclick="setView('tree')">Tree</button>
+      </div>
     </div>
 
-    <div class="card" style="padding:0;overflow:hidden">
-      <div class="table-wrap">
+    <div id="findings-layout">
+      <!-- Tree panel (visible in tree view only) -->
+      <div class="tree-panel" id="tree-panel">
+        <div id="tree-root"></div>
+      </div>
+      <!-- Findings table -->
+      <div id="findings-table-wrap">
         <table id="findings-table">
           <thead>
             <tr>
@@ -430,8 +485,7 @@
               <th><input class="filter-input" type="search" id="ff-ev"   placeholder="Filter…"       oninput="applyFindingFilters()"></th>
             </tr>
           </thead>
-          <tbody id="findings-tbody">
-          </tbody>
+          <tbody id="findings-tbody"></tbody>
         </table>
       </div>
     </div>
@@ -445,10 +499,13 @@
 'use strict';
 
 const jobId = new URLSearchParams(location.search).get('id');
-let jobData = null;
-let allFindings = [];
-let pollTimer = null;
+let jobData         = null;
+let allFindings     = [];
+let pollTimer       = null;
 let prevToolStatuses = {};
+let currentView     = 'list';
+let treeRoot        = null;
+let selectedTreePath = null; // null = all findings
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
 
@@ -569,6 +626,8 @@ async function loadFindings() {
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
     allFindings = data.findings || [];
+    treeRoot = buildTree(allFindings);
+    if (currentView === 'tree') renderTreePanel(treeRoot);
     applyFindingFilters();
   } catch (e) {
     document.getElementById('findings-tbody').innerHTML =
@@ -586,6 +645,14 @@ function applyFindingFilters() {
   const ev    = document.getElementById('ff-ev').value.toLowerCase();
 
   const filtered = allFindings.filter(f => {
+    // Tree path filter — check finding URL is under the selected path segment.
+    if (selectedTreePath !== null) {
+      try {
+        const u  = new URL(f.url);
+        const fp = '/' + u.host + u.pathname;
+        if (fp !== selectedTreePath && !fp.startsWith(selectedTreePath + '/')) return false;
+      } catch { return false; }
+    }
     if (sev   && f.severity !== sev)                                           return false;
     if (title && !f.title.toLowerCase().includes(title))                       return false;
     if (url   && !(f.url   || '').toLowerCase().includes(url))                 return false;
@@ -663,6 +730,131 @@ async function retrigger() {
   } finally {
     btn.disabled = false;
   }
+}
+
+// ── Tree view ─────────────────────────────────────────────────────────────────
+
+function setView(view) {
+  currentView = view;
+  document.getElementById('btn-list').classList.toggle('active', view === 'list');
+  document.getElementById('btn-tree').classList.toggle('active', view === 'tree');
+  const layout = document.getElementById('findings-layout');
+  layout.classList.toggle('tree-view', view === 'tree');
+  if (view === 'tree') {
+    if (treeRoot) renderTreePanel(treeRoot);
+  } else {
+    selectedTreePath = null;
+  }
+  applyFindingFilters();
+}
+
+// Build a trie from the findings URL corpus.
+function buildTree(findings) {
+  const root = { seg: '', path: '', children: new Map(), findings: [] };
+  for (const f of findings) {
+    let u;
+    try { u = new URL(f.url); } catch { continue; }
+    const segs = [u.host, ...u.pathname.split('/').filter(Boolean)];
+    let node = root;
+    let path = '';
+    for (const seg of segs) {
+      path += '/' + seg;
+      if (!node.children.has(seg)) {
+        node.children.set(seg, { seg, path, children: new Map(), findings: [] });
+      }
+      node = node.children.get(seg);
+    }
+    node.findings.push(f);
+  }
+  // Annotate each node with its full subtree findings + highest severity.
+  function annotate(node) {
+    node.allFindings = [...node.findings];
+    for (const child of node.children.values()) {
+      annotate(child);
+      node.allFindings.push(...child.allFindings);
+    }
+    node.topSev = ['critical','high','medium','low','info']
+      .find(s => node.allFindings.some(f => f.severity === s)) || null;
+  }
+  annotate(root);
+  return root;
+}
+
+function renderTreePanel(root) {
+  const container = document.getElementById('tree-root');
+  container.innerHTML = '';
+
+  // "All" row at top — selects nothing (shows all).
+  const allRow = makeTreeRow('', 'All paths', root.allFindings.length, root.topSev, true, false);
+  allRow.style.fontStyle = 'italic';
+  allRow.querySelector('.tree-label').style.color = 'var(--muted)';
+  allRow.addEventListener('click', () => selectTreePath(null));
+  container.appendChild(allRow);
+
+  const ul = document.createElement('ul');
+  ul.className = 'tree-list';
+  for (const child of root.children.values()) {
+    ul.appendChild(buildTreeLi(child));
+  }
+  container.appendChild(ul);
+}
+
+function buildTreeLi(node) {
+  const li = document.createElement('li');
+  li.className = 'tree-node open'; // start expanded
+
+  const hasChildren = node.children.size > 0;
+  const row = makeTreeRow(
+    node.path, node.seg, node.allFindings.length, node.topSev,
+    selectedTreePath === node.path, hasChildren
+  );
+
+  row.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (hasChildren) {
+      li.classList.toggle('open');
+      row.querySelector('.tree-toggle').textContent =
+        li.classList.contains('open') ? '▾' : '▸';
+    }
+    selectTreePath(node.path);
+  });
+  li.appendChild(row);
+
+  if (hasChildren) {
+    const ul = document.createElement('ul');
+    ul.className = 'tree-children';
+    for (const child of node.children.values()) {
+      ul.appendChild(buildTreeLi(child));
+    }
+    li.appendChild(ul);
+  }
+  return li;
+}
+
+function makeTreeRow(path, label, count, topSev, isSelected, hasChildren) {
+  const row = document.createElement('div');
+  row.className = 'tree-row' + (isSelected ? ' selected' : '');
+  row.dataset.path = path;
+
+  const toggleChar = hasChildren ? '▾' : '·';
+  const countHtml  = count > 0 && topSev
+    ? `<span class="tree-count sev-${topSev}">${count}</span>`
+    : (count > 0 ? `<span class="tree-count" style="color:var(--muted)">${count}</span>` : '');
+
+  row.innerHTML =
+    `<span class="tree-toggle">${toggleChar}</span>` +
+    `<span class="tree-label" title="${esc(path || 'All')}">${esc(label)}</span>` +
+    countHtml;
+  return row;
+}
+
+function selectTreePath(path) {
+  selectedTreePath = path;
+  document.querySelectorAll('#tree-root .tree-row').forEach(r => {
+    const match = path === null ? r.dataset.path === '' : r.dataset.path === path;
+    r.classList.toggle('selected', match);
+  });
+  applyFindingFilters();
 }
 
 // ── Log streaming ─────────────────────────────────────────────────────────────
