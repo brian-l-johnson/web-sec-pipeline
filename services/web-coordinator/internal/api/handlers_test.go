@@ -77,6 +77,18 @@ func (m *mockStore) ListFindings(_ context.Context, jobID uuid.UUID) ([]store.We
 	return m.findings[jobID], nil
 }
 
+func (m *mockStore) TriageFinding(_ context.Context, _, _ uuid.UUID, _ string) error {
+	return m.err
+}
+
+func (m *mockStore) ListFindingsSummaries(_ context.Context, _ []uuid.UUID) (map[uuid.UUID]store.FindingsSummary, error) {
+	return map[uuid.UUID]store.FindingsSummary{}, m.err
+}
+
+func (m *mockStore) Ping(_ context.Context) error {
+	return m.err
+}
+
 type mockRetriggerer struct {
 	called bool
 	err    error
@@ -495,6 +507,45 @@ func TestLogsHandler_OK(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), `"done":true`) {
 		t.Errorf("body missing done event: %s", rec.Body.String())
+	}
+}
+
+func TestTriageHandler_OK(t *testing.T) {
+	s := newMockStore()
+	job := makeJob("complete")
+	s.jobs[job.ID] = job
+	findingID := uuid.New()
+
+	h := newTestHandler(s, &mockRetriggerer{})
+	req := httptest.NewRequest(http.MethodPatch, "/jobs/"+job.ID.String()+"/findings/"+findingID.String(),
+		strings.NewReader(`{"triage_status":"confirmed"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body)
+	}
+}
+
+func TestTriageHandler_InvalidStatus(t *testing.T) {
+	s := newMockStore()
+	job := makeJob("complete")
+	s.jobs[job.ID] = job
+
+	h := newTestHandler(s, &mockRetriggerer{})
+	req := httptest.NewRequest(http.MethodPatch, "/jobs/"+job.ID.String()+"/findings/"+uuid.NewString(),
+		strings.NewReader(`{"triage_status":"bogus"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", rec.Code)
 	}
 }
 

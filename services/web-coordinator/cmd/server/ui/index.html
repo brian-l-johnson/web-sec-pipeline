@@ -272,6 +272,7 @@
             <th>Target</th>
             <th>Profile</th>
             <th>Status</th>
+            <th>Findings</th>
             <th>Crawl</th>
             <th>ZAP</th>
             <th>Nuclei</th>
@@ -297,6 +298,7 @@
                 <option value="pending">Pending</option>
               </select>
             </th>
+            <th></th>
             <th>
               <select class="filter-input" id="f-crawl" onchange="applyFilters()">
                 <option value="">All</option>
@@ -329,7 +331,7 @@
           </tr>
         </thead>
         <tbody id="jobs-tbody">
-          <tr><td colspan="8" class="empty-state">Loading…</td></tr>
+          <tr><td colspan="9" class="empty-state">Loading…</td></tr>
         </tbody>
       </table>
     </div>
@@ -376,6 +378,17 @@ function toolPill(label, status) {
 
 function shortId(id) { return id.slice(0, 8); }
 
+function renderFindingsSummary(s) {
+  if (!s || s.total === 0) return '<span style="color:var(--muted)">—</span>';
+  const parts = [];
+  if (s.critical) parts.push(`<span style="color:#ff8090;font-weight:700">${s.critical}C</span>`);
+  if (s.high)     parts.push(`<span style="color:#f08020;font-weight:700">${s.high}H</span>`);
+  if (s.medium)   parts.push(`<span style="color:var(--yellow)">${s.medium}M</span>`);
+  if (s.low)      parts.push(`<span style="color:var(--green)">${s.low}L</span>`);
+  if (s.info)     parts.push(`<span style="color:var(--muted)">${s.info}I</span>`);
+  return parts.join(' <span style="color:var(--border)">·</span> ');
+}
+
 // ── Jobs rendering ─────────────────────────────────────────────────────────
 
 function renderJobs(data) {
@@ -419,7 +432,7 @@ function renderJobRows(filtered) {
     const msg = jobs.length === 0
       ? `<div>No scans yet</div><p>Submit a target URL above to start your first scan.</p>`
       : `<div>No jobs match the current filters.</div>`;
-    tbody.innerHTML = `<tr><td colspan="8" class="empty-state">${msg}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="9" class="empty-state">${msg}</td></tr>`;
     return;
   }
 
@@ -430,6 +443,7 @@ function renderJobRows(filtered) {
     </td>
     <td>${esc(j.scan_profile)}</td>
     <td>${badge(j.status)}</td>
+    <td style="white-space:nowrap">${renderFindingsSummary(j.findings_summary)}</td>
     <td>${toolPill('Crawl', j.crawl_status)}</td>
     <td>${toolPill('ZAP', j.zap_status)}</td>
     <td>${toolPill('Nuclei', j.nuclei_status)}</td>

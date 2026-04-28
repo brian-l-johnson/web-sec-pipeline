@@ -20,6 +20,8 @@ definitions:
         type: string
       tool:
         type: string
+      triage_status:
+        type: string
       url:
         type: string
     type: object
@@ -29,6 +31,21 @@ definitions:
         items:
           $ref: '#/definitions/api.FindingResponse'
         type: array
+      total:
+        type: integer
+    type: object
+  api.FindingsSummaryResponse:
+    properties:
+      critical:
+        type: integer
+      high:
+        type: integer
+      info:
+        type: integer
+      low:
+        type: integer
+      medium:
+        type: integer
       total:
         type: integer
     type: object
@@ -49,6 +66,8 @@ definitions:
         type: string
       error:
         type: string
+      findings_summary:
+        $ref: '#/definitions/api.FindingsSummaryResponse'
       har_path:
         type: string
       job_id:
@@ -261,6 +280,49 @@ paths:
               type: string
             type: object
       summary: List findings for a scan job
+      tags:
+      - jobs
+  /jobs/{id}/findings/{findingId}:
+    patch:
+      consumes:
+      - application/json
+      parameters:
+      - description: Job UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Finding UUID
+        in: path
+        name: findingId
+        required: true
+        type: string
+      - description: 'triage_status: new|confirmed|false_positive'
+        in: body
+        name: body
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.FindingResponse'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Triage a finding
       tags:
       - jobs
   /jobs/{id}/logs:

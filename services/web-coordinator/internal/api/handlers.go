@@ -26,6 +26,9 @@ type Storer interface {
 	ListJobs(ctx context.Context, limit, offset int) ([]store.WebJob, error)
 	CountJobs(ctx context.Context) (int, error)
 	ListFindings(ctx context.Context, jobID uuid.UUID) ([]store.WebFinding, error)
+	TriageFinding(ctx context.Context, findingID, jobID uuid.UUID, status string) error
+	ListFindingsSummaries(ctx context.Context, jobIDs []uuid.UUID) (map[uuid.UUID]store.FindingsSummary, error)
+	Ping(ctx context.Context) error
 }
 
 // JobRetriggerer is the subset of pipeline.Orchestrator used by the HTTP handlers.
@@ -78,6 +81,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /jobs", h.SubmitJobHandler)
 	mux.HandleFunc("GET /jobs/{id}", h.GetJobHandler)
 	mux.HandleFunc("GET /jobs/{id}/findings", h.ListFindingsHandler)
+	mux.HandleFunc("PATCH /jobs/{id}/findings/{findingId}", h.TriageHandler)
 	mux.HandleFunc("GET /jobs/{id}/artifacts/{tool}", h.ArtifactHandler)
 	mux.HandleFunc("GET /jobs/{id}/logs", h.LogsHandler)
 	mux.HandleFunc("POST /jobs/{id}/reparse-findings", h.ReparseHandler)
@@ -106,34 +110,46 @@ func formatTime(t *time.Time) string {
 // Response types
 // ---------------------------------------------------------------------------
 
+// FindingsSummaryResponse holds per-severity finding counts, excluding false positives.
+type FindingsSummaryResponse struct {
+	Critical int `json:"critical"`
+	High     int `json:"high"`
+	Medium   int `json:"medium"`
+	Low      int `json:"low"`
+	Info     int `json:"info"`
+	Total    int `json:"total"`
+}
+
 // JobResponse is the JSON representation of a web_jobs row.
 type JobResponse struct {
-	JobID        string `json:"job_id"`
-	Status       string `json:"status"`
-	TargetURL    string `json:"target_url"`
-	ScanProfile  string `json:"scan_profile"`
-	SubmittedAt  string `json:"submitted_at"`
-	StartedAt    string `json:"started_at,omitempty"`
-	CompletedAt  string `json:"completed_at,omitempty"`
-	CrawlStatus  string `json:"crawl_status"`
-	ZAPStatus    string `json:"zap_status"`
-	NucleiStatus string `json:"nuclei_status"`
-	HARPath      string `json:"har_path,omitempty"`
-	Error        string `json:"error,omitempty"`
+	JobID           string                   `json:"job_id"`
+	Status          string                   `json:"status"`
+	TargetURL       string                   `json:"target_url"`
+	ScanProfile     string                   `json:"scan_profile"`
+	SubmittedAt     string                   `json:"submitted_at"`
+	StartedAt       string                   `json:"started_at,omitempty"`
+	CompletedAt     string                   `json:"completed_at,omitempty"`
+	CrawlStatus     string                   `json:"crawl_status"`
+	ZAPStatus       string                   `json:"zap_status"`
+	NucleiStatus    string                   `json:"nuclei_status"`
+	HARPath         string                   `json:"har_path,omitempty"`
+	Error           string                   `json:"error,omitempty"`
+	FindingsSummary *FindingsSummaryResponse `json:"findings_summary,omitempty"`
 }
 
 // FindingResponse is the JSON representation of a web_findings row.
 type FindingResponse struct {
-	ID          string `json:"id"`
-	JobID       string `json:"job_id"`
-	Tool        string `json:"tool"`
-	Severity    string `json:"severity"`
-	Title       string `json:"title"`
-	URL         string `json:"url"`
-	Description string `json:"description,omitempty"`
-	Evidence    string `json:"evidence,omitempty"`
-	CWE         *int   `json:"cwe,omitempty"`
-	TemplateID  string `json:"template_id,omitempty"`
+	ID           string `json:"id"`
+	JobID        string `json:"job_id"`
+	Tool         string `json:"tool"`
+	Severity     string `json:"severity"`
+	Title        string `json:"title"`
+	URL          string `json:"url"`
+	Description  string `json:"description,omitempty"`
+	Evidence     string `json:"evidence,omitempty"`
+	CWE          *int   `json:"cwe,omitempty"`
+	TemplateID   string `json:"template_id,omitempty"`
+	TriageStatus string `json:"triage_status"`
 }
 
 // JobListResponse wraps a paginated list of jobs.
@@ -179,13 +195,14 @@ func jobToResponse(j *store.WebJob) JobResponse {
 
 func findingToResponse(f *store.WebFinding) FindingResponse {
 	r := FindingResponse{
-		ID:       f.ID.String(),
-		JobID:    f.JobID.String(),
-		Tool:     f.Tool,
-		Severity: f.Severity,
-		Title:    f.Title,
-		URL:      f.URL,
-		CWE:      f.CWE,
+		ID:           f.ID.String(),
+		JobID:        f.JobID.String(),
+		Tool:         f.Tool,
+		Severity:     f.Severity,
+		Title:        f.Title,
+		URL:          f.URL,
+		CWE:          f.CWE,
+		TriageStatus: f.TriageStatus,
 	}
 	if f.Description != nil {
 		r.Description = *f.Description
@@ -339,6 +356,28 @@ func (h *Handler) ListJobsHandler(w http.ResponseWriter, r *http.Request) {
 	for i := range jobList {
 		resp.Jobs[i] = jobToResponse(&jobList[i])
 	}
+
+	// Attach findings summaries in one query.
+	ids := make([]uuid.UUID, len(jobList))
+	for i, j := range jobList {
+		ids[i] = j.ID
+	}
+	if summaries, err := h.store.ListFindingsSummaries(r.Context(), ids); err == nil {
+		for i := range resp.Jobs {
+			id, _ := uuid.Parse(resp.Jobs[i].JobID)
+			if s, ok := summaries[id]; ok {
+				resp.Jobs[i].FindingsSummary = &FindingsSummaryResponse{
+					Critical: s.Critical,
+					High:     s.High,
+					Medium:   s.Medium,
+					Low:      s.Low,
+					Info:     s.Info,
+					Total:    s.Critical + s.High + s.Medium + s.Low + s.Info,
+				}
+			}
+		}
+	}
+
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -413,6 +452,61 @@ func (h *Handler) ListFindingsHandler(w http.ResponseWriter, r *http.Request) {
 		resp.Findings[i] = findingToResponse(&findings[i])
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// TriageHandler handles PATCH /jobs/{id}/findings/{findingId}.
+// Updates the triage_status of a single finding.
+//
+// @Summary      Triage a finding
+// @Tags         jobs
+// @Accept       json
+// @Produce      json
+// @Param        id         path  string  true  "Job UUID"
+// @Param        findingId  path  string  true  "Finding UUID"
+// @Param        body       body  object  true  "triage_status: new|confirmed|false_positive"
+// @Success      200  {object}  api.FindingResponse
+// @Failure      400  {object}  map[string]string
+// @Failure      404  {object}  map[string]string
+// @Router       /jobs/{id}/findings/{findingId} [patch]
+func (h *Handler) TriageHandler(w http.ResponseWriter, r *http.Request) {
+	jobID, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid job ID")
+		return
+	}
+	findingID, err := uuid.Parse(r.PathValue("findingId"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid finding ID")
+		return
+	}
+
+	var req struct {
+		TriageStatus string `json:"triage_status"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+	switch req.TriageStatus {
+	case "new", "confirmed", "false_positive":
+	default:
+		writeError(w, http.StatusBadRequest, "triage_status must be one of: new, confirmed, false_positive")
+		return
+	}
+
+	if err := h.store.TriageFinding(r.Context(), findingID, jobID, req.TriageStatus); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "finding not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "triaging finding: "+err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{
+		"id":            findingID.String(),
+		"triage_status": req.TriageStatus,
+	})
 }
 
 // ArtifactHandler handles GET /jobs/{id}/artifacts/{tool}.

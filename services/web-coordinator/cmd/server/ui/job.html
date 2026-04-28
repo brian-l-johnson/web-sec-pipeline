@@ -250,6 +250,37 @@
   .desc-cell { max-width: 300px; font-size: 12px; color: var(--muted); }
   .evidence-cell { max-width: 200px; font-size: 11px; font-family: var(--mono); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+  /* Triage */
+  .triage-badge {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    padding: 2px 6px;
+    border-radius: 3px;
+    letter-spacing: .3px;
+    margin-bottom: 4px;
+  }
+  .triage-new       { background: rgba(122,127,153,.12); color: var(--muted); }
+  .triage-confirmed { background: rgba(62,207,142,.12);  color: var(--green); }
+  .triage-fp        { background: rgba(224,92,106,.12);  color: var(--red);   }
+  .triage-actions   { display: flex; gap: 4px; flex-wrap: wrap; }
+  .triage-btn {
+    cursor: pointer;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--muted);
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 6px;
+    transition: all .15s;
+  }
+  .triage-btn:hover { color: var(--text); border-color: var(--text); }
+  .triage-btn.confirm:hover { color: var(--green); border-color: var(--green); }
+  .triage-btn.fp:hover      { color: var(--red);   border-color: var(--red);   }
+  tr.row-fp td { opacity: 0.45; }
+
   /* Filter row */
   tr.filter-row th { padding: 4px 10px 8px; }
   .filter-input {
@@ -470,6 +501,7 @@
               <th>CWE</th>
               <th>Description</th>
               <th>Evidence</th>
+              <th>Triage</th>
             </tr>
             <tr class="filter-row">
               <th>
@@ -494,6 +526,14 @@
               <th><input class="filter-input" type="search" id="ff-cwe"  placeholder="e.g. 79"       oninput="applyFindingFilters()"></th>
               <th><input class="filter-input" type="search" id="ff-desc" placeholder="Filter desc…"  oninput="applyFindingFilters()"></th>
               <th><input class="filter-input" type="search" id="ff-ev"   placeholder="Filter…"       oninput="applyFindingFilters()"></th>
+              <th>
+                <select class="filter-input" id="ff-triage" onchange="applyFindingFilters()">
+                  <option value="">All</option>
+                  <option value="new">New</option>
+                  <option value="confirmed">Confirmed</option>
+                  <option value="false_positive">False Positive</option>
+                </select>
+              </th>
             </tr>
           </thead>
           <tbody id="findings-tbody"></tbody>
@@ -646,18 +686,19 @@ async function loadFindings() {
     applyFindingFilters();
   } catch (e) {
     document.getElementById('findings-tbody').innerHTML =
-      `<tr><td colspan="7" class="no-findings" style="color:var(--red)">Failed to load findings: ${esc(e.message)}</td></tr>`;
+      `<tr><td colspan="8" class="no-findings" style="color:var(--red)">Failed to load findings: ${esc(e.message)}</td></tr>`;
   }
 }
 
 function applyFindingFilters() {
-  const sev   = document.getElementById('ff-sev').value;
-  const title = document.getElementById('ff-title').value.toLowerCase();
-  const url   = document.getElementById('ff-url').value.toLowerCase();
-  const tool  = document.getElementById('ff-tool').value;
-  const cwe   = document.getElementById('ff-cwe').value.toLowerCase().replace('cwe-', '');
-  const desc  = document.getElementById('ff-desc').value.toLowerCase();
-  const ev    = document.getElementById('ff-ev').value.toLowerCase();
+  const sev    = document.getElementById('ff-sev').value;
+  const title  = document.getElementById('ff-title').value.toLowerCase();
+  const url    = document.getElementById('ff-url').value.toLowerCase();
+  const tool   = document.getElementById('ff-tool').value;
+  const cwe    = document.getElementById('ff-cwe').value.toLowerCase().replace('cwe-', '');
+  const desc   = document.getElementById('ff-desc').value.toLowerCase();
+  const ev     = document.getElementById('ff-ev').value.toLowerCase();
+  const triage = document.getElementById('ff-triage').value;
 
   const filtered = allFindings.filter(f => {
     // Tree path filter
@@ -672,13 +713,14 @@ function applyFindingFilters() {
     if (selectedCWE !== null) {
       if (selectedCWE === 'none' ? f.cwe != null : f.cwe !== selectedCWE) return false;
     }
-    if (sev   && f.severity !== sev)                                           return false;
-    if (title && !f.title.toLowerCase().includes(title))                       return false;
-    if (url   && !(f.url   || '').toLowerCase().includes(url))                 return false;
-    if (tool  && f.tool !== tool)                                              return false;
-    if (cwe   && !(f.cwe ? String(f.cwe) : '').includes(cwe))                 return false;
-    if (desc  && !(f.description || '').toLowerCase().includes(desc))          return false;
-    if (ev    && !(f.evidence    || '').toLowerCase().includes(ev))            return false;
+    if (sev    && f.severity !== sev)                                           return false;
+    if (title  && !f.title.toLowerCase().includes(title))                       return false;
+    if (url    && !(f.url   || '').toLowerCase().includes(url))                 return false;
+    if (tool   && f.tool !== tool)                                              return false;
+    if (cwe    && !(f.cwe ? String(f.cwe) : '').includes(cwe))                 return false;
+    if (desc   && !(f.description || '').toLowerCase().includes(desc))          return false;
+    if (ev     && !(f.evidence    || '').toLowerCase().includes(ev))            return false;
+    if (triage && f.triage_status !== triage)                                   return false;
     return true;
   });
 
@@ -697,21 +739,57 @@ function renderFindingRows(filtered) {
     const msg = allFindings.length === 0
       ? 'No findings recorded yet.'
       : 'No findings match the current filters.';
-    tbody.innerHTML = `<tr><td colspan="7" class="no-findings">${msg}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="8" class="no-findings">${msg}</td></tr>`;
     return;
   }
 
-  tbody.innerHTML = filtered.map(f => `<tr>
-    <td><span class="sev sev-${f.severity}">${f.severity}</span></td>
-    <td>${esc(f.title)}</td>
-    <td><span class="url-mono" title="${esc(f.url)}">${esc(f.url)}</span></td>
-    <td style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--muted)">${esc(f.tool)}</td>
-    <td>${f.cwe
-      ? `<a href="https://cwe.mitre.org/data/definitions/${f.cwe}.html" target="_blank" rel="noopener" style="color:var(--accent);font-size:12px">CWE-${f.cwe}</a>`
-      : `<span style="color:var(--muted)">—</span>`}</td>
-    <td class="desc-cell">${esc(f.description || '')}</td>
-    <td class="evidence-cell" title="${esc(f.evidence || '')}">${esc(f.evidence || '')}</td>
-  </tr>`).join('');
+  tbody.innerHTML = filtered.map(f => {
+    const ts = f.triage_status || 'new';
+    const tsLabel = ts === 'false_positive' ? 'False Positive' : ts.charAt(0).toUpperCase() + ts.slice(1);
+    const tsBadgeCls = ts === 'false_positive' ? 'triage-fp' : ts === 'confirmed' ? 'triage-confirmed' : 'triage-new';
+    const rowCls = ts === 'false_positive' ? ' class="row-fp"' : '';
+
+    const btnConfirm = ts !== 'confirmed'
+      ? `<button class="triage-btn confirm" onclick="triageFinding('${f.id}','confirmed')">✓ Confirm</button>` : '';
+    const btnFP = ts !== 'false_positive'
+      ? `<button class="triage-btn fp" onclick="triageFinding('${f.id}','false_positive')">✗ FP</button>` : '';
+    const btnReset = ts !== 'new'
+      ? `<button class="triage-btn" onclick="triageFinding('${f.id}','new')">↺ Reset</button>` : '';
+
+    return `<tr${rowCls}>
+      <td><span class="sev sev-${f.severity}">${f.severity}</span></td>
+      <td>${esc(f.title)}</td>
+      <td><span class="url-mono" title="${esc(f.url)}">${esc(f.url)}</span></td>
+      <td style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--muted)">${esc(f.tool)}</td>
+      <td>${f.cwe
+        ? `<a href="https://cwe.mitre.org/data/definitions/${f.cwe}.html" target="_blank" rel="noopener" style="color:var(--accent);font-size:12px">CWE-${f.cwe}</a>`
+        : `<span style="color:var(--muted)">—</span>`}</td>
+      <td class="desc-cell">${esc(f.description || '')}</td>
+      <td class="evidence-cell" title="${esc(f.evidence || '')}">${esc(f.evidence || '')}</td>
+      <td>
+        <span class="triage-badge ${tsBadgeCls}">${tsLabel}</span>
+        <div class="triage-actions">${btnConfirm}${btnFP}${btnReset}</div>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+// ── Triage ────────────────────────────────────────────────────────────────────
+
+async function triageFinding(findingId, status) {
+  try {
+    const resp = await fetch(`/jobs/${jobId}/findings/${findingId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ triage_status: status }),
+    });
+    if (!resp.ok) throw new Error((await resp.json()).error || `HTTP ${resp.status}`);
+    const f = allFindings.find(f => f.id === findingId);
+    if (f) f.triage_status = status;
+    applyFindingFilters();
+  } catch (e) {
+    showToast('Triage failed: ' + e.message, 'error');
+  }
 }
 
 // ── Actions ───────────────────────────────────────────────────────────────────

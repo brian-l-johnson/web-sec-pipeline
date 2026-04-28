@@ -270,6 +270,71 @@ const docTemplate = `{
                 }
             }
         },
+        "/jobs/{id}/findings/{findingId}": {
+            "patch": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "jobs"
+                ],
+                "summary": "Triage a finding",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Job UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Finding UUID",
+                        "name": "findingId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "triage_status: new|confirmed|false_positive",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.FindingResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/jobs/{id}/logs": {
             "get": {
                 "description": "Server-Sent Events stream of log lines from the crawl, ZAP, and Nuclei pods. Follows pods until they exit; waits up to 90 minutes for tools that haven't started yet.",
@@ -461,6 +526,9 @@ const docTemplate = `{
                 "tool": {
                     "type": "string"
                 },
+                "triage_status": {
+                    "type": "string"
+                },
                 "url": {
                     "type": "string"
                 }
@@ -474,6 +542,29 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/api.FindingResponse"
                     }
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "api.FindingsSummaryResponse": {
+            "type": "object",
+            "properties": {
+                "critical": {
+                    "type": "integer"
+                },
+                "high": {
+                    "type": "integer"
+                },
+                "info": {
+                    "type": "integer"
+                },
+                "low": {
+                    "type": "integer"
+                },
+                "medium": {
+                    "type": "integer"
                 },
                 "total": {
                     "type": "integer"
@@ -505,6 +596,9 @@ const docTemplate = `{
                 },
                 "error": {
                     "type": "string"
+                },
+                "findings_summary": {
+                    "$ref": "#/definitions/api.FindingsSummaryResponse"
                 },
                 "har_path": {
                     "type": "string"

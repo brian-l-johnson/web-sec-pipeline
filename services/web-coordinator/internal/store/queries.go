@@ -4,11 +4,22 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
+
+// FindingsSummary holds per-severity finding counts for a job,
+// excluding false positives.
+type FindingsSummary struct {
+	Critical int
+	High     int
+	Medium   int
+	Low      int
+	Info     int
+}
 
 // WebJob represents a row in the web_jobs table.
 type WebJob struct {
@@ -30,17 +41,18 @@ type WebJob struct {
 
 // WebFinding represents a row in the web_findings table.
 type WebFinding struct {
-	ID          uuid.UUID
-	JobID       uuid.UUID
-	Tool        string // zap, nuclei
-	Severity    string // info, low, medium, high, critical
-	Title       string
-	URL         string
-	Description *string
-	Evidence    *string
-	CWE         *int
-	TemplateID  *string
-	CreatedAt   time.Time
+	ID            uuid.UUID
+	JobID         uuid.UUID
+	Tool          string // zap, nuclei
+	Severity      string // info, low, medium, high, critical
+	Title         string
+	URL           string
+	Description   *string
+	Evidence      *string
+	CWE           *int
+	TemplateID    *string
+	CreatedAt     time.Time
+	TriageStatus  string // new, confirmed, false_positive
 }
 
 // CreateJob inserts a new job into the database.
@@ -282,7 +294,7 @@ func (s *Store) InsertFinding(ctx context.Context, f WebFinding) error {
 func (s *Store) ListFindings(ctx context.Context, jobID uuid.UUID) ([]WebFinding, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, job_id, tool, severity, title, url,
-		       description, evidence, cwe, template_id, created_at
+		       description, evidence, cwe, template_id, created_at, triage_status
 		FROM web_findings
 		WHERE job_id = $1
 		ORDER BY
@@ -308,12 +320,74 @@ func (s *Store) ListFindings(ctx context.Context, jobID uuid.UUID) ([]WebFinding
 		if err := rows.Scan(
 			&f.ID, &f.JobID, &f.Tool, &f.Severity, &f.Title, &f.URL,
 			&f.Description, &f.Evidence, &f.CWE, &f.TemplateID, &f.CreatedAt,
+			&f.TriageStatus,
 		); err != nil {
 			return nil, fmt.Errorf("scan finding: %w", err)
 		}
 		findings = append(findings, f)
 	}
 	return findings, rows.Err()
+}
+
+// TriageFinding updates the triage_status of a finding, validating it belongs
+// to the given job. Returns pgx.ErrNoRows if the finding is not found.
+func (s *Store) TriageFinding(ctx context.Context, findingID, jobID uuid.UUID, status string) error {
+	result, err := s.pool.Exec(ctx,
+		`UPDATE web_findings SET triage_status = $3 WHERE id = $1 AND job_id = $2`,
+		findingID, jobID, status,
+	)
+	if err != nil {
+		return fmt.Errorf("triage finding: %w", err)
+	}
+	if result.RowsAffected() == 0 {
+		return pgx.ErrNoRows
+	}
+	return nil
+}
+
+// ListFindingsSummaries returns per-severity counts for each of the given jobs,
+// excluding false positives. Jobs with no findings are omitted from the result.
+func (s *Store) ListFindingsSummaries(ctx context.Context, jobIDs []uuid.UUID) (map[uuid.UUID]FindingsSummary, error) {
+	if len(jobIDs) == 0 {
+		return map[uuid.UUID]FindingsSummary{}, nil
+	}
+
+	args := make([]any, len(jobIDs))
+	placeholders := make([]string, len(jobIDs))
+	for i, id := range jobIDs {
+		args[i] = id
+		placeholders[i] = fmt.Sprintf("$%d", i+1)
+	}
+
+	query := fmt.Sprintf(`
+		SELECT job_id,
+			COUNT(*) FILTER (WHERE severity = 'critical') AS critical,
+			COUNT(*) FILTER (WHERE severity = 'high')     AS high,
+			COUNT(*) FILTER (WHERE severity = 'medium')   AS medium,
+			COUNT(*) FILTER (WHERE severity = 'low')      AS low,
+			COUNT(*) FILTER (WHERE severity = 'info')     AS info
+		FROM web_findings
+		WHERE job_id IN (%s)
+		  AND triage_status != 'false_positive'
+		GROUP BY job_id`,
+		strings.Join(placeholders, ", "))
+
+	rows, err := s.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list findings summaries: %w", err)
+	}
+	defer rows.Close()
+
+	result := make(map[uuid.UUID]FindingsSummary, len(jobIDs))
+	for rows.Next() {
+		var jobID uuid.UUID
+		var s FindingsSummary
+		if err := rows.Scan(&jobID, &s.Critical, &s.High, &s.Medium, &s.Low, &s.Info); err != nil {
+			return nil, fmt.Errorf("scan finding summary: %w", err)
+		}
+		result[jobID] = s
+	}
+	return result, rows.Err()
 }
 
 // scanJob scans a single web_jobs row from a pgx.Row or pgx.Rows.
