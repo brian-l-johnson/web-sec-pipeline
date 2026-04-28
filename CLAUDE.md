@@ -84,6 +84,42 @@ cd services/web-ingestion && ~/go/bin/swag init -g cmd/server/main.go --output d
 
 Commit the updated `docs/` files alongside handler changes.
 
+## Web UI
+
+The coordinator embeds a web UI from `services/web-coordinator/cmd/server/ui/`. Pages are served via Go's `html/template` — **not** as plain static files.
+
+### Template structure
+
+- `ui/nav.html` — defines two named template blocks used by every page:
+  - `{{define "nav-css"}}` — nav CSS, injected into each page's `<head>`
+  - `{{define "nav"}}` — header markup; receives `ActivePage string` to highlight the correct link
+- `ui/index.html`, `ui/job.html`, `ui/targets.html` — full page templates; each includes:
+  ```html
+  {{template "nav-css" .}}   <!-- inside <style> in <head> -->
+  {{template "nav" .}}       <!-- first element of <body> -->
+  ```
+
+### Adding a new page
+
+1. Create `ui/<page>.html` with the two template calls above.
+2. Add a `case` in the `GET /ui/` handler switch in `cmd/server/main.go`:
+   ```go
+   case "<page>.html":
+       renderUI(w, uiTmpl, "<page>.html", "<active-page-key>")
+   ```
+3. Add the nav link in `ui/nav.html` with the matching `ActivePage` key:
+   ```html
+   <a href="/ui/<page>.html"{{if eq .ActivePage "<active-page-key>"}} class="active"{{end}}>Label</a>
+   ```
+
+### Template data
+
+`renderUI` passes a `uiPage{ActivePage: "..."}` struct to every template. Currently only `ActivePage` is used but this is the place to add server-side data (version, feature flags, etc.) in future.
+
+### Static assets
+
+Non-HTML files under `ui/` (JS snippets, images) are still served by `http.FileServer` via the `default:` branch of the same switch. There is no separate static file route.
+
 ## GitOps
 
 Kubernetes manifests and Flux Kustomizations are managed in a separate repo:
