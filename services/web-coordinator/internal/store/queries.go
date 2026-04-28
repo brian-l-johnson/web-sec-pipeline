@@ -90,7 +90,8 @@ func (s *Store) GetJob(ctx context.Context, jobID uuid.UUID) (*WebJob, error) {
 	row := s.pool.QueryRow(ctx, `
 		SELECT id, status, target_url, scope, auth_config, scan_profile,
 		       submitted_at, started_at, completed_at, error, har_path,
-		       crawl_status, zap_status, nuclei_status
+		       crawl_status, zap_status, nuclei_status,
+		       target_id, schedule_id, window_expires_at
 		FROM web_jobs
 		WHERE id = $1`,
 		jobID,
@@ -107,7 +108,8 @@ func (s *Store) ListJobs(ctx context.Context, limit, offset int) ([]WebJob, erro
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, status, target_url, scope, auth_config, scan_profile,
 		       submitted_at, started_at, completed_at, error, har_path,
-		       crawl_status, zap_status, nuclei_status
+		       crawl_status, zap_status, nuclei_status,
+		       target_id, schedule_id, window_expires_at
 		FROM web_jobs
 		ORDER BY submitted_at DESC
 		LIMIT $1 OFFSET $2`,
@@ -144,7 +146,8 @@ func (s *Store) ListRunningJobs(ctx context.Context) ([]WebJob, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, status, target_url, scope, auth_config, scan_profile,
 		       submitted_at, started_at, completed_at, error, har_path,
-		       crawl_status, zap_status, nuclei_status
+		       crawl_status, zap_status, nuclei_status,
+		       target_id, schedule_id, window_expires_at
 		FROM web_jobs
 		WHERE status = 'running'`,
 	)
