@@ -245,6 +245,7 @@ function scheduleRow(sc) {
     <td style="color:var(--muted);font-size:12px">Next: ${next}</td>
     <td>
       <div class="actions">
+        <button class="btn-ghost btn-sm" onclick="editSchedule('${sc.id}')">Edit</button>
         <button class="btn-ghost btn-sm" onclick="toggleEnabled('${sc.id}', ${!sc.enabled})">${sc.enabled ? 'Disable' : 'Enable'}</button>
         <button class="btn-danger-sm btn-sm" onclick="deleteSchedule('${sc.id}')">Delete</button>
       </div>
@@ -370,6 +371,17 @@ async function saveSchedule() {
     await loadTargets();
   } catch(e) {
     showToast('Save failed: ' + e.message, 'error');
+  }
+}
+
+function editSchedule(schedId) {
+  for (const t of targets) {
+    for (const sc of (t.schedules || [])) {
+      if (sc.id === schedId) {
+        showSchedForm(t.id, sc);
+        return;
+      }
+    }
   }
 }
 
