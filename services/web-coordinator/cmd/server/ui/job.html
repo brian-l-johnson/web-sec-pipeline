@@ -884,6 +884,87 @@ function selectTreePath(path) {
   applyFindingFilters();
 }
 
+// ── CWE names ─────────────────────────────────────────────────────────────────
+
+const CWE_NAMES = {
+  16:   'Configuration',
+  22:   'Path Traversal',
+  79:   'Cross-site Scripting (XSS)',
+  80:   'Basic XSS',
+  89:   'SQL Injection',
+  90:   'LDAP Injection',
+  91:   'XML Injection',
+  94:   'Code Injection',
+  95:   'Eval Injection',
+  113:  'HTTP Response Splitting',
+  116:  'Improper Encoding or Escaping',
+  200:  'Exposure of Sensitive Information',
+  201:  'Insertion of Sensitive Information into Sent Data',
+  203:  'Observable Discrepancy',
+  204:  'Observable Response Discrepancy',
+  209:  'Error Message Contains Sensitive Info',
+  250:  'Execution with Unnecessary Privileges',
+  256:  'Unprotected Storage of Credentials',
+  284:  'Improper Access Control',
+  285:  'Improper Authorization',
+  287:  'Improper Authentication',
+  288:  'Authentication Bypass via Alternate Path',
+  295:  'Improper Certificate Validation',
+  297:  'Certificate Host Mismatch',
+  311:  'Missing Encryption of Sensitive Data',
+  312:  'Cleartext Storage of Sensitive Information',
+  315:  'Cleartext Storage in Cookie',
+  319:  'Cleartext Transmission of Sensitive Information',
+  326:  'Inadequate Encryption Strength',
+  327:  'Use of Broken Cryptographic Algorithm',
+  328:  'Use of Weak Hash',
+  330:  'Use of Insufficiently Random Values',
+  331:  'Insufficient Entropy',
+  338:  'Weak Pseudo-Random Number Generator',
+  345:  'Insufficient Verification of Data Authenticity',
+  346:  'Origin Validation Error',
+  352:  'Cross-Site Request Forgery (CSRF)',
+  384:  'Session Fixation',
+  400:  'Uncontrolled Resource Consumption',
+  425:  'Forced Browsing',
+  434:  'Unrestricted File Upload',
+  472:  'External Control of Web Parameter',
+  494:  'Download Without Integrity Check',
+  497:  'Exposure of System Information',
+  502:  'Deserialization of Untrusted Data',
+  521:  'Weak Password Requirements',
+  522:  'Insufficiently Protected Credentials',
+  523:  'Unprotected Transport of Credentials',
+  525:  'Web Browser Cache Contains Sensitive Info',
+  530:  'Exposed Backup File',
+  532:  'Sensitive Information in Log File',
+  538:  'Sensitive File Accessible Externally',
+  540:  'Sensitive Information in Source Code',
+  548:  'Exposure via Directory Listing',
+  552:  'Files Accessible to External Parties',
+  601:  'Open Redirect',
+  611:  'XML External Entity (XXE)',
+  613:  'Insufficient Session Expiration',
+  614:  'Missing Secure Cookie Flag',
+  639:  'Authorization Bypass via User-Controlled Key',
+  693:  'Protection Mechanism Failure',
+  732:  'Incorrect Permission Assignment',
+  757:  'Weak Algorithm Negotiation',
+  770:  'Allocation Without Limits or Throttling',
+  776:  'Recursive Entity Reference (Billion Laughs)',
+  778:  'Insufficient Logging',
+  798:  'Hard-coded Credentials',
+  829:  'Inclusion from Untrusted Control Sphere',
+  830:  'Web Functionality from Untrusted Source',
+  863:  'Incorrect Authorization',
+  918:  'Server-Side Request Forgery (SSRF)',
+  943:  'Improper Neutralization in Data Query',
+  1004: 'Missing HttpOnly Cookie Flag',
+  1021: 'Clickjacking / UI Redress Attack',
+  1022: 'Open Redirect via window.opener',
+  1275: 'Missing SameSite Cookie Attribute',
+};
+
 // ── CWE view ──────────────────────────────────────────────────────────────────
 
 function buildCWEGroups(findings) {
@@ -927,8 +1008,12 @@ function renderCWEPanel(groups) {
   for (const g of groups) {
     const li    = document.createElement('li');
     li.className = 'tree-node';
-    const label = g.cwe === 'none' ? 'No CWE' : `CWE-${g.cwe}`;
-    const row   = makeTreeRow(String(g.cwe), label, g.findings.length, g.topSev, selectedCWE === g.cwe, false);
+    const cweName = g.cwe !== 'none' ? (CWE_NAMES[g.cwe] || '') : '';
+    const label   = g.cwe === 'none' ? 'No CWE' : `CWE-${g.cwe}`;
+    const display = cweName ? `${label} — ${cweName}` : label;
+    const row   = makeTreeRow(String(g.cwe), display, g.findings.length, g.topSev, selectedCWE === g.cwe, false);
+    // Override title to show full name on hover (in case it's truncated).
+    if (cweName) row.querySelector('.tree-label').title = `${label}: ${cweName}`;
     row.addEventListener('click', () => selectCWEGroup(g.cwe));
     li.appendChild(row);
     ul.appendChild(li);
