@@ -207,10 +207,11 @@
     animation: spin .7s linear infinite;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
+{{template "nav-css" .}}
 </style>
 </head>
 <body>
-<script src="nav.js"></script>
+{{template "nav" .}}
 
 <main>
 

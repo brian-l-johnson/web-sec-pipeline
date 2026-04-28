@@ -445,10 +445,11 @@
 
   #loading-state { text-align: center; padding: 60px; color: var(--muted); }
   #error-state   { text-align: center; padding: 60px; color: var(--red); }
+{{template "nav-css" .}}
 </style>
 </head>
 <body>
-<script src="nav.js"></script>
+{{template "nav" .}}
 
 <main>
   <a class="back-link" href="/ui/">All Jobs</a>

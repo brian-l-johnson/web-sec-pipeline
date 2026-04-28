@@ -59,10 +59,11 @@
   .toast.success { border-color:var(--green); color:var(--green); }
   .collapsible { display:none; }
   .collapsible.open { display:table-row-group; }
+{{template "nav-css" .}}
 </style>
 </head>
 <body>
-<script src="nav.js"></script>
+{{template "nav" .}}
 <main>
   <a class="back-link" href="/ui/">All Jobs</a>
 

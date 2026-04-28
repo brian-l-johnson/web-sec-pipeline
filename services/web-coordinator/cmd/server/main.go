@@ -12,11 +12,13 @@ import (
 	"context"
 	"embed"
 	"fmt"
+	"html/template"
 	"io/fs"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -131,12 +133,31 @@ func main() {
 	h.RegisterRoutes(mux)
 	mux.Handle("GET /swagger/", httpSwagger.WrapHandler)
 
-	// Serve the embedded web UI at /ui/.
+	// Parse embedded UI templates (nav.html + page HTML files).
+	uiTmpl, err := template.ParseFS(uiFiles, "ui/*.html")
+	if err != nil {
+		log.Fatalf("parse ui templates: %v", err)
+	}
+
+	// Static assets (JS, images, etc.) still served directly from the embed.
 	uiSub, err := fs.Sub(uiFiles, "ui")
 	if err != nil {
-		log.Fatalf("embed ui sub: %v", err) // should never happen with valid embed path
+		log.Fatalf("embed ui sub: %v", err)
 	}
-	mux.Handle("GET /ui/", http.StripPrefix("/ui/", http.FileServer(http.FS(uiSub))))
+	staticUI := http.StripPrefix("/ui/", http.FileServer(http.FS(uiSub)))
+
+	mux.HandleFunc("GET /ui/", func(w http.ResponseWriter, r *http.Request) {
+		switch strings.TrimPrefix(r.URL.Path, "/ui/") {
+		case "", "index.html":
+			renderUI(w, uiTmpl, "index.html", "jobs")
+		case "job.html":
+			renderUI(w, uiTmpl, "job.html", "jobs")
+		case "targets.html":
+			renderUI(w, uiTmpl, "targets.html", "targets")
+		default:
+			staticUI.ServeHTTP(w, r)
+		}
+	})
 
 	// Root redirects to the web UI.
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
@@ -193,6 +214,20 @@ func runMigrations(databaseURL, migrationsDir string) error {
 		return fmt.Errorf("goose up: %w", err)
 	}
 	return nil
+}
+
+// uiPage is the data passed to every UI template.
+type uiPage struct {
+	ActivePage string // "jobs" | "targets"
+}
+
+// renderUI executes a named template and writes it as HTML.
+func renderUI(w http.ResponseWriter, tmpl *template.Template, name, activePage string) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := tmpl.ExecuteTemplate(w, name, uiPage{ActivePage: activePage}); err != nil {
+		log.Printf("ui: render %s: %v", name, err)
+		http.Error(w, "render error", http.StatusInternalServerError)
+	}
 }
 
 func getEnv(key, defaultVal string) string {
