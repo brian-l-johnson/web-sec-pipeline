@@ -505,6 +505,9 @@ const docTemplate = `{
                 "description": {
                     "type": "string"
                 },
+                "details": {
+                    "type": "object"
+                },
                 "evidence": {
                     "type": "string"
                 },

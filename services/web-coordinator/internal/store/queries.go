@@ -41,18 +41,19 @@ type WebJob struct {
 
 // WebFinding represents a row in the web_findings table.
 type WebFinding struct {
-	ID            uuid.UUID
-	JobID         uuid.UUID
-	Tool          string // zap, nuclei
-	Severity      string // info, low, medium, high, critical
-	Title         string
-	URL           string
-	Description   *string
-	Evidence      *string
-	CWE           *int
-	TemplateID    *string
-	CreatedAt     time.Time
-	TriageStatus  string // new, confirmed, false_positive
+	ID           uuid.UUID
+	JobID        uuid.UUID
+	Tool         string // zap, nuclei
+	Severity     string // info, low, medium, high, critical
+	Title        string
+	URL          string
+	Description  *string
+	Evidence     *string
+	CWE          *int
+	TemplateID   *string
+	CreatedAt    time.Time
+	TriageStatus string          // new, confirmed, false_positive
+	Details      json.RawMessage // tool-specific fields (JSONB)
 }
 
 // CreateJob inserts a new job into the database.
@@ -276,13 +277,13 @@ func (s *Store) InsertFinding(ctx context.Context, f WebFinding) error {
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO web_findings (
 			id, job_id, tool, severity, title, url,
-			description, evidence, cwe, template_id
+			description, evidence, cwe, template_id, details
 		) VALUES (
 			$1, $2, $3, $4, $5, $6,
-			$7, $8, $9, $10
+			$7, $8, $9, $10, $11
 		)`,
 		f.ID, f.JobID, f.Tool, f.Severity, f.Title, f.URL,
-		f.Description, f.Evidence, f.CWE, f.TemplateID,
+		f.Description, f.Evidence, f.CWE, f.TemplateID, []byte(f.Details),
 	)
 	if err != nil {
 		return fmt.Errorf("insert finding: %w", err)
@@ -294,7 +295,8 @@ func (s *Store) InsertFinding(ctx context.Context, f WebFinding) error {
 func (s *Store) ListFindings(ctx context.Context, jobID uuid.UUID) ([]WebFinding, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, job_id, tool, severity, title, url,
-		       description, evidence, cwe, template_id, created_at, triage_status
+		       description, evidence, cwe, template_id, created_at, triage_status,
+		       details
 		FROM web_findings
 		WHERE job_id = $1
 		ORDER BY
@@ -317,12 +319,16 @@ func (s *Store) ListFindings(ctx context.Context, jobID uuid.UUID) ([]WebFinding
 	var findings []WebFinding
 	for rows.Next() {
 		var f WebFinding
+		var detailsBytes []byte
 		if err := rows.Scan(
 			&f.ID, &f.JobID, &f.Tool, &f.Severity, &f.Title, &f.URL,
 			&f.Description, &f.Evidence, &f.CWE, &f.TemplateID, &f.CreatedAt,
-			&f.TriageStatus,
+			&f.TriageStatus, &detailsBytes,
 		); err != nil {
 			return nil, fmt.Errorf("scan finding: %w", err)
+		}
+		if detailsBytes != nil {
+			f.Details = json.RawMessage(detailsBytes)
 		}
 		findings = append(findings, f)
 	}

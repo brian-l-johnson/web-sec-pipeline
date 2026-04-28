@@ -139,17 +139,18 @@ type JobResponse struct {
 
 // FindingResponse is the JSON representation of a web_findings row.
 type FindingResponse struct {
-	ID           string `json:"id"`
-	JobID        string `json:"job_id"`
-	Tool         string `json:"tool"`
-	Severity     string `json:"severity"`
-	Title        string `json:"title"`
-	URL          string `json:"url"`
-	Description  string `json:"description,omitempty"`
-	Evidence     string `json:"evidence,omitempty"`
-	CWE          *int   `json:"cwe,omitempty"`
-	TemplateID   string `json:"template_id,omitempty"`
-	TriageStatus string `json:"triage_status"`
+	ID           string          `json:"id"`
+	JobID        string          `json:"job_id"`
+	Tool         string          `json:"tool"`
+	Severity     string          `json:"severity"`
+	Title        string          `json:"title"`
+	URL          string          `json:"url"`
+	Description  string          `json:"description,omitempty"`
+	Evidence     string          `json:"evidence,omitempty"`
+	CWE          *int            `json:"cwe,omitempty"`
+	TemplateID   string          `json:"template_id,omitempty"`
+	TriageStatus string          `json:"triage_status"`
+	Details      json.RawMessage `json:"details,omitempty" swaggertype:"object"`
 }
 
 // JobListResponse wraps a paginated list of jobs.
@@ -203,6 +204,7 @@ func findingToResponse(f *store.WebFinding) FindingResponse {
 		URL:          f.URL,
 		CWE:          f.CWE,
 		TriageStatus: f.TriageStatus,
+		Details:      f.Details,
 	}
 	if f.Description != nil {
 		r.Description = *f.Description

@@ -250,6 +250,51 @@
   .desc-cell { max-width: 300px; font-size: 12px; color: var(--muted); }
   .evidence-cell { max-width: 200px; font-size: 11px; font-family: var(--mono); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+  /* Finding details panel */
+  .detail-panel {
+    padding: 14px 16px;
+    background: rgba(0,0,0,.25);
+    border-top: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .detail-row    { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .detail-col    { display: flex; flex-direction: column; gap: 4px; }
+  .detail-label  {
+    font-size: 10px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .5px; color: var(--muted); min-width: 90px; flex-shrink: 0;
+  }
+  .detail-text   { font-size: 12px; color: var(--text); line-height: 1.6; }
+  .detail-kv     { font-size: 12px; color: var(--muted); }
+  .detail-kv code {
+    font-family: var(--mono); font-size: 11px; color: var(--text);
+    background: rgba(255,255,255,.06); padding: 1px 5px; border-radius: 3px;
+  }
+  .detail-code {
+    font-family: var(--mono); font-size: 11px; background: var(--bg);
+    border: 1px solid var(--border); border-radius: 4px; padding: 8px 10px;
+    white-space: pre-wrap; word-break: break-all;
+    max-height: 220px; overflow-y: auto; color: var(--text); margin-top: 2px;
+  }
+  .tag-pill {
+    display: inline-block; font-size: 10px; font-weight: 600;
+    padding: 1px 6px; border-radius: 3px;
+    background: rgba(91,141,238,.12); color: var(--accent); margin-right: 3px;
+  }
+  .copy-btn {
+    cursor: pointer; background: transparent; border: 1px solid var(--border);
+    color: var(--muted); font-size: 10px; padding: 1px 6px; border-radius: 3px;
+    margin-left: 8px;
+  }
+  .copy-btn:hover { color: var(--text); border-color: var(--text); }
+  .expand-btn {
+    cursor: pointer; background: transparent; border: none;
+    color: var(--muted); font-size: 9px; padding: 0 5px 0 0;
+    vertical-align: middle;
+  }
+  .expand-btn:hover { color: var(--text); }
+
   /* Triage */
   .triage-badge {
     display: inline-block;
@@ -743,11 +788,13 @@ function renderFindingRows(filtered) {
     return;
   }
 
-  tbody.innerHTML = filtered.map(f => {
+  tbody.innerHTML = filtered.flatMap(f => {
     const ts = f.triage_status || 'new';
     const tsLabel = ts === 'false_positive' ? 'False Positive' : ts.charAt(0).toUpperCase() + ts.slice(1);
     const tsBadgeCls = ts === 'false_positive' ? 'triage-fp' : ts === 'confirmed' ? 'triage-confirmed' : 'triage-new';
     const rowCls = ts === 'false_positive' ? ' class="row-fp"' : '';
+    const isExpanded = expandedFindings.has(f.id);
+    const hasDetails = f.details && Object.keys(f.details).length > 0;
 
     const btnConfirm = ts !== 'confirmed'
       ? `<button class="triage-btn confirm" onclick="triageFinding('${f.id}','confirmed')">✓ Confirm</button>` : '';
@@ -756,8 +803,11 @@ function renderFindingRows(filtered) {
     const btnReset = ts !== 'new'
       ? `<button class="triage-btn" onclick="triageFinding('${f.id}','new')">↺ Reset</button>` : '';
 
-    return `<tr${rowCls}>
-      <td><span class="sev sev-${f.severity}">${f.severity}</span></td>
+    const mainRow = `<tr${rowCls}>
+      <td>
+        ${hasDetails ? `<button class="expand-btn" onclick="toggleFindingDetails('${f.id}')">${isExpanded ? '▼' : '▶'}</button>` : ''}
+        <span class="sev sev-${f.severity}">${f.severity}</span>
+      </td>
       <td>${esc(f.title)}</td>
       <td><span class="url-mono" title="${esc(f.url)}">${esc(f.url)}</span></td>
       <td style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--muted)">${esc(f.tool)}</td>
@@ -771,7 +821,147 @@ function renderFindingRows(filtered) {
         <div class="triage-actions">${btnConfirm}${btnFP}${btnReset}</div>
       </td>
     </tr>`;
+
+    const detailsHTML = isExpanded ? renderDetails(f) : '';
+    const detailsRow = detailsHTML
+      ? `<tr><td colspan="8" style="padding:0;border-bottom:1px solid var(--border)">${detailsHTML}</td></tr>`
+      : '';
+
+    return [mainRow, detailsRow];
   }).join('');
+}
+
+// ── Finding details ───────────────────────────────────────────────────────────
+
+const expandedFindings = new Set();
+
+function toggleFindingDetails(id) {
+  expandedFindings.has(id) ? expandedFindings.delete(id) : expandedFindings.add(id);
+  applyFindingFilters();
+}
+
+function renderDetails(f) {
+  const d = f.details;
+  if (!d || Object.keys(d).length === 0) return '';
+
+  const rows = [];
+
+  // ── ZAP: inline technical fields ──────────────────────────────────────────
+  if (d.confidence) {
+    rows.push(`<div class="detail-row">
+      <span class="detail-label">Confidence</span>
+      <span class="sev sev-${confSev(d.confidence)}">${esc(d.confidence)}</span>
+    </div>`);
+  }
+  if (d.method || d.param || d.attack) {
+    let tech = '';
+    if (d.method) tech += `<span class="detail-kv">Method: <code>${esc(d.method)}</code></span> `;
+    if (d.param)  tech += `<span class="detail-kv">Param: <code>${esc(d.param)}</code></span> `;
+    if (d.attack) tech += `<span class="detail-kv">Attack: <code>${esc(d.attack)}</code></span>`;
+    rows.push(`<div class="detail-row"><span class="detail-label">Request</span>${tech}</div>`);
+  }
+  if (d.solution) {
+    rows.push(`<div class="detail-col">
+      <span class="detail-label">Solution</span>
+      <p class="detail-text">${esc(d.solution)}</p>
+    </div>`);
+  }
+
+  // ── Nuclei: CVE / CVSS ────────────────────────────────────────────────────
+  if (d.cve_id && d.cve_id.length > 0) {
+    const links = d.cve_id.map(c =>
+      `<a href="https://nvd.nist.gov/vuln/detail/${esc(c)}" target="_blank" rel="noopener" style="color:var(--accent)">${esc(c)}</a>`
+    ).join(' ');
+    rows.push(`<div class="detail-row"><span class="detail-label">CVE</span>${links}</div>`);
+  }
+  if (d.cvss_score) {
+    rows.push(`<div class="detail-row"><span class="detail-label">CVSS</span>
+      <span style="font-weight:700;font-size:13px;color:${cvssColor(d.cvss_score)}">${d.cvss_score.toFixed(1)}</span>
+      ${d.cvss_metrics ? `<span style="font-family:var(--mono);font-size:11px;color:var(--muted)">${esc(d.cvss_metrics)}</span>` : ''}
+      ${d.epss_score ? `<span style="color:var(--muted);font-size:11px">EPSS ${(d.epss_score * 100).toFixed(1)}%</span>` : ''}
+    </div>`);
+  }
+  if (d.tags && d.tags.length > 0) {
+    rows.push(`<div class="detail-row"><span class="detail-label">Tags</span>
+      ${d.tags.map(t => `<span class="tag-pill">${esc(t)}</span>`).join('')}
+    </div>`);
+  }
+  if (d.remediation) {
+    rows.push(`<div class="detail-col">
+      <span class="detail-label">Remediation</span>
+      <p class="detail-text">${esc(d.remediation)}</p>
+    </div>`);
+  }
+  if (d.matcher_name) {
+    rows.push(`<div class="detail-row"><span class="detail-label">Matcher</span>
+      <code style="font-family:var(--mono);font-size:11px">${esc(d.matcher_name)}</code>
+    </div>`);
+  }
+  if (d.extracted_results && d.extracted_results.length > 0) {
+    rows.push(`<div class="detail-col">
+      <span class="detail-label">Extracted</span>
+      ${d.extracted_results.map(r => `<code style="font-family:var(--mono);font-size:11px;color:var(--yellow)">${esc(r)}</code>`).join('<br>')}
+    </div>`);
+  }
+
+  // ── Shared: references ────────────────────────────────────────────────────
+  const refs = Array.isArray(d.reference) ? d.reference : (d.reference ? d.reference.split('\n').map(s=>s.trim()).filter(Boolean) : []);
+  if (refs.length > 0) {
+    const links = refs.map(r => `<a href="${esc(r)}" target="_blank" rel="noopener" style="color:var(--accent);font-size:12px">${esc(r)}</a>`).join('<br>');
+    rows.push(`<div class="detail-col"><span class="detail-label">References</span>${links}</div>`);
+  }
+
+  // ── Nuclei: curl + request/response ──────────────────────────────────────
+  if (d.curl_command) {
+    const safeCmd = esc(d.curl_command);
+    rows.push(`<div class="detail-col">
+      <span class="detail-label">Curl Command
+        <button class="copy-btn" onclick="copyToClipboard(${JSON.stringify(d.curl_command)})">Copy</button>
+      </span>
+      <pre class="detail-code">${safeCmd}</pre>
+    </div>`);
+  }
+  if (d.request) {
+    rows.push(`<div class="detail-col">
+      <span class="detail-label">Request</span>
+      <pre class="detail-code">${esc(d.request)}</pre>
+    </div>`);
+  }
+  if (d.response) {
+    rows.push(`<div class="detail-col">
+      <span class="detail-label">Response</span>
+      <pre class="detail-code">${esc(d.response)}</pre>
+    </div>`);
+  }
+
+  if (rows.length === 0) return '';
+  return `<div class="detail-panel">${rows.join('')}</div>`;
+}
+
+function confSev(c) {
+  switch ((c || '').toLowerCase()) {
+    case 'confirmed': return 'critical';
+    case 'high':      return 'high';
+    case 'medium':    return 'medium';
+    case 'low':       return 'low';
+    default:          return 'info';
+  }
+}
+
+function cvssColor(score) {
+  if (score >= 9) return '#ff8090';
+  if (score >= 7) return '#f08020';
+  if (score >= 4) return 'var(--yellow)';
+  return 'var(--green)';
+}
+
+async function copyToClipboard(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    showToast('Copied to clipboard', 'success');
+  } catch {
+    showToast('Copy failed — try selecting manually', 'error');
+  }
 }
 
 // ── Triage ────────────────────────────────────────────────────────────────────
