@@ -7,7 +7,11 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
+	"strings"
 	"time"
+
+	cronlib "github.com/robfig/cron/v3"
 
 	"github.com/google/uuid"
 
@@ -257,6 +261,145 @@ func (o *Orchestrator) launchScanners(ctx context.Context, jobID uuid.UUID) {
 			}
 		}()
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Scheduler
+// ---------------------------------------------------------------------------
+
+// RunScheduler runs every minute: launches due schedules and enforces scan windows.
+// Blocks until ctx is cancelled.
+func (o *Orchestrator) RunScheduler(ctx context.Context) {
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+	o.schedulerTick(ctx) // run once immediately at startup
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			o.schedulerTick(ctx)
+		}
+	}
+}
+
+func (o *Orchestrator) schedulerTick(ctx context.Context) {
+	o.launchDueSchedules(ctx)
+	o.enforceWindows(ctx)
+}
+
+func (o *Orchestrator) launchDueSchedules(ctx context.Context) {
+	schedules, err := o.store.ListDueSchedules(ctx)
+	if err != nil {
+		log.Printf("scheduler: list due schedules: %v", err)
+		return
+	}
+	for _, sched := range schedules {
+		target, err := o.store.GetTarget(ctx, sched.TargetID)
+		if err != nil {
+			log.Printf("scheduler: get target (schedule=%s): %v", sched.ID, err)
+			continue
+		}
+
+		var windowExpiresAt *time.Time
+		if sched.WindowEnd != nil {
+			exp := windowTimeToday(*sched.WindowEnd)
+			windowExpiresAt = &exp
+		}
+
+		jobID, err := o.submitScheduledJob(ctx, target, sched.ID, windowExpiresAt)
+		if err != nil {
+			log.Printf("scheduler: submit job (schedule=%s target=%s): %v", sched.ID, target.Name, err)
+			continue
+		}
+
+		now := time.Now()
+		nextRun, err := computeNextRun(sched.CronExpr, now)
+		if err != nil {
+			log.Printf("scheduler: compute next run (schedule=%s): %v", sched.ID, err)
+			continue
+		}
+		if err := o.store.UpdateScheduleRunTimes(ctx, sched.ID, now, nextRun); err != nil {
+			log.Printf("scheduler: update run times (schedule=%s): %v", sched.ID, err)
+		}
+		log.Printf("scheduler: launched job %s for '%s' (next=%s)", jobID, target.Name, nextRun.Format(time.RFC3339))
+	}
+}
+
+func (o *Orchestrator) enforceWindows(ctx context.Context) {
+	jobs, err := o.store.ListRunningJobsExceedingWindow(ctx)
+	if err != nil {
+		log.Printf("scheduler: enforce windows: %v", err)
+		return
+	}
+	for _, job := range jobs {
+		log.Printf("scheduler: scan window expired for job %s — cancelling", job.ID)
+		o.manager.CancelJob(ctx, job.ID)
+		if err := o.store.SetJobError(ctx, job.ID, "scan window expired"); err != nil {
+			log.Printf("scheduler: set error (job=%s): %v", job.ID, err)
+		}
+	}
+}
+
+// submitScheduledJob creates a web_jobs row and launches the crawl k8s Job.
+func (o *Orchestrator) submitScheduledJob(ctx context.Context, target *store.ScanTarget, scheduleID uuid.UUID, windowExpiresAt *time.Time) (uuid.UUID, error) {
+	jobID := uuid.New()
+	job := store.WebJob{
+		ID:              jobID,
+		Status:          "running",
+		TargetURL:       target.TargetURL,
+		Scope:           target.Scope,
+		AuthConfig:      target.AuthConfig,
+		ScanProfile:     target.ScanProfile,
+		SubmittedAt:     time.Now(),
+		CrawlStatus:     "running",
+		ZAPStatus:       "pending",
+		NucleiStatus:    "pending",
+		TargetID:        &target.ID,
+		ScheduleID:      &scheduleID,
+		WindowExpiresAt: windowExpiresAt,
+	}
+	if job.Scope == nil {
+		job.Scope = []string{}
+	}
+	if err := o.store.CreateJob(ctx, job); err != nil {
+		return uuid.Nil, fmt.Errorf("create job: %w", err)
+	}
+	if err := o.store.SetJobStarted(ctx, jobID); err != nil {
+		log.Printf("scheduler: set job started (job=%s): %v", jobID, err)
+	}
+	if err := o.manager.CreateCrawlJob(ctx, jobID, target.TargetURL, target.Scope, target.AuthConfig); err != nil {
+		_ = o.store.SetJobError(ctx, jobID, fmt.Sprintf("create crawl job: %v", err))
+		return uuid.Nil, fmt.Errorf("create crawl job: %w", err)
+	}
+	return jobID, nil
+}
+
+// computeNextRun returns the next occurrence of cronExpr after t.
+func computeNextRun(cronExpr string, after time.Time) (time.Time, error) {
+	p := cronlib.NewParser(cronlib.Minute | cronlib.Hour | cronlib.Dom | cronlib.Month | cronlib.Dow)
+	sched, err := p.Parse(cronExpr)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("parse cron %q: %w", cronExpr, err)
+	}
+	return sched.Next(after), nil
+}
+
+// windowTimeToday returns today's UTC date combined with the "HH:MM" time.
+// If the resulting time is already in the past, it rolls to tomorrow.
+func windowTimeToday(hhmm string) time.Time {
+	parts := strings.SplitN(hhmm, ":", 2)
+	hour, _ := strconv.Atoi(parts[0])
+	min := 0
+	if len(parts) == 2 {
+		min, _ = strconv.Atoi(parts[1])
+	}
+	now := time.Now().UTC()
+	t := time.Date(now.Year(), now.Month(), now.Day(), hour, min, 0, 0, time.UTC)
+	if t.Before(now) {
+		t = t.Add(24 * time.Hour)
+	}
+	return t
 }
 
 // SweepStaleJobs marks any job that has been stuck in 'running' longer than

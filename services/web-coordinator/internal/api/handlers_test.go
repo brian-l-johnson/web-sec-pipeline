@@ -140,8 +140,30 @@ func (m *mockLogStreamer) StreamJobLogs(_ context.Context, _ uuid.UUID, out chan
 	close(out)
 }
 
+type mockTargetStorer struct{}
+
+func (m *mockTargetStorer) CreateTarget(_ context.Context, _ store.ScanTarget) error  { return nil }
+func (m *mockTargetStorer) GetTarget(_ context.Context, _ uuid.UUID) (*store.ScanTarget, error) {
+	return nil, pgx.ErrNoRows
+}
+func (m *mockTargetStorer) ListTargets(_ context.Context) ([]store.ScanTarget, error) { return nil, nil }
+func (m *mockTargetStorer) UpdateTarget(_ context.Context, _ store.ScanTarget) error  { return nil }
+func (m *mockTargetStorer) DeleteTarget(_ context.Context, _ uuid.UUID) error          { return nil }
+func (m *mockTargetStorer) CreateSchedule(_ context.Context, _ store.ScanSchedule) error { return nil }
+func (m *mockTargetStorer) GetSchedule(_ context.Context, _ uuid.UUID) (*store.ScanSchedule, error) {
+	return nil, pgx.ErrNoRows
+}
+func (m *mockTargetStorer) ListSchedules(_ context.Context, _ uuid.UUID) ([]store.ScanSchedule, error) {
+	return nil, nil
+}
+func (m *mockTargetStorer) UpdateSchedule(_ context.Context, _ store.ScanSchedule) error { return nil }
+func (m *mockTargetStorer) DeleteSchedule(_ context.Context, _ uuid.UUID) error           { return nil }
+func (m *mockTargetStorer) SetScheduleEnabled(_ context.Context, _ uuid.UUID, _ bool, _ *time.Time) error {
+	return nil
+}
+
 func newTestHandler(s Storer, r JobRetriggerer) *Handler {
-	return NewHandler(s, r, &mockSubmitter{}, &mockReparserer{}, &mockLogStreamer{}, "")
+	return NewHandler(s, &mockTargetStorer{}, r, &mockSubmitter{}, &mockReparserer{}, &mockLogStreamer{}, "")
 }
 
 func doRequest(t *testing.T, h *Handler, method, path string) *httptest.ResponseRecorder {
@@ -402,7 +424,7 @@ func TestReparseHandler_Success(t *testing.T) {
 	s.jobs[job.ID] = job
 
 	mux := http.NewServeMux()
-	h := NewHandler(s, &mockRetriggerer{}, &mockSubmitter{}, &mockReparserer{zapFindings: 3, nucleiFindings: 2}, &mockLogStreamer{}, "")
+	h := NewHandler(s, &mockTargetStorer{}, &mockRetriggerer{}, &mockSubmitter{}, &mockReparserer{zapFindings: 3, nucleiFindings: 2}, &mockLogStreamer{}, "")
 	h.RegisterRoutes(mux)
 
 	req := httptest.NewRequest(http.MethodPost, "/jobs/"+job.ID.String()+"/reparse-findings", nil)
@@ -427,7 +449,7 @@ func TestReparseHandler_Success(t *testing.T) {
 
 func TestReparseHandler_JobNotFound(t *testing.T) {
 	mux := http.NewServeMux()
-	h := NewHandler(newMockStore(), &mockRetriggerer{}, &mockSubmitter{}, &mockReparserer{}, &mockLogStreamer{}, "")
+	h := NewHandler(newMockStore(), &mockTargetStorer{}, &mockRetriggerer{}, &mockSubmitter{}, &mockReparserer{}, &mockLogStreamer{}, "")
 	h.RegisterRoutes(mux)
 
 	req := httptest.NewRequest(http.MethodPost, "/jobs/"+uuid.NewString()+"/reparse-findings", nil)
@@ -441,7 +463,7 @@ func TestReparseHandler_JobNotFound(t *testing.T) {
 
 func TestReparseHandler_InvalidID(t *testing.T) {
 	mux := http.NewServeMux()
-	h := NewHandler(newMockStore(), &mockRetriggerer{}, &mockSubmitter{}, &mockReparserer{}, &mockLogStreamer{}, "")
+	h := NewHandler(newMockStore(), &mockTargetStorer{}, &mockRetriggerer{}, &mockSubmitter{}, &mockReparserer{}, &mockLogStreamer{}, "")
 	h.RegisterRoutes(mux)
 
 	req := httptest.NewRequest(http.MethodPost, "/jobs/not-a-uuid/reparse-findings", nil)
@@ -492,7 +514,7 @@ func TestLogsHandler_OK(t *testing.T) {
 	s.jobs[job.ID] = job
 
 	mux := http.NewServeMux()
-	h := NewHandler(s, &mockRetriggerer{}, &mockSubmitter{}, &mockReparserer{}, &mockLogStreamer{}, "")
+	h := NewHandler(s, &mockTargetStorer{}, &mockRetriggerer{}, &mockSubmitter{}, &mockReparserer{}, &mockLogStreamer{}, "")
 	h.RegisterRoutes(mux)
 
 	req := httptest.NewRequest(http.MethodGet, "/jobs/"+job.ID.String()+"/logs", nil)
@@ -551,7 +573,7 @@ func TestTriageHandler_InvalidStatus(t *testing.T) {
 
 func TestLogsHandler_NotFound(t *testing.T) {
 	mux := http.NewServeMux()
-	h := NewHandler(newMockStore(), &mockRetriggerer{}, &mockSubmitter{}, &mockReparserer{}, &mockLogStreamer{}, "")
+	h := NewHandler(newMockStore(), &mockTargetStorer{}, &mockRetriggerer{}, &mockSubmitter{}, &mockReparserer{}, &mockLogStreamer{}, "")
 	h.RegisterRoutes(mux)
 
 	req := httptest.NewRequest(http.MethodGet, "/jobs/"+uuid.NewString()+"/logs", nil)
@@ -569,7 +591,7 @@ func TestReparseHandler_ReparserError(t *testing.T) {
 	s.jobs[job.ID] = job
 
 	mux := http.NewServeMux()
-	h := NewHandler(s, &mockRetriggerer{}, &mockSubmitter{}, &mockReparserer{err: fmt.Errorf("db error")}, &mockLogStreamer{}, "")
+	h := NewHandler(s, &mockTargetStorer{}, &mockRetriggerer{}, &mockSubmitter{}, &mockReparserer{err: fmt.Errorf("db error")}, &mockLogStreamer{}, "")
 	h.RegisterRoutes(mux)
 
 	req := httptest.NewRequest(http.MethodPost, "/jobs/"+job.ID.String()+"/reparse-findings", nil)

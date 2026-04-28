@@ -101,6 +101,11 @@ func main() {
 		manager.WatchJobs(workerCtx, orch)
 	}()
 
+	go func() {
+		log.Println("starting scan scheduler...")
+		orch.RunScheduler(workerCtx)
+	}()
+
 	consumer, err := queue.NewConsumer(natsURL, orch)
 	if err != nil {
 		log.Fatalf("create nats consumer: %v", err)
@@ -114,7 +119,7 @@ func main() {
 		}
 	}()
 
-	h := api.NewHandler(s, orch, orch, orch, manager, dataDir)
+	h := api.NewHandler(s, s, orch, orch, orch, manager, dataDir)
 	h.AddHealthCheck(s.Ping)
 	h.AddHealthCheck(func(ctx context.Context) error {
 		if !consumer.Healthy() {

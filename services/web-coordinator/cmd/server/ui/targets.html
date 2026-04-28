@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Targets — Web Security Scanner</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg:#0f1117; --surface:#1a1d27; --border:#2a2d3a; --text:#e2e4ed;
+    --muted:#7a7f99; --accent:#5b8dee; --green:#3ecf8e; --red:#e05c6a;
+    --yellow:#f0b429; --purple:#a78bfa; --radius:8px;
+    --mono:'JetBrains Mono','Fira Code','Courier New',monospace;
+  }
+  body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; font-size:14px; line-height:1.5; min-height:100vh; }
+  header { background:var(--surface); border-bottom:1px solid var(--border); padding:14px 24px; display:flex; align-items:center; gap:10px; }
+  header h1 { font-size:16px; font-weight:600; }
+  header .dot { width:8px; height:8px; border-radius:50%; background:var(--green); box-shadow:0 0 6px var(--green); }
+  header .sub { color:var(--muted); font-size:12px; margin-left:auto; }
+  main { max-width:1100px; margin:0 auto; padding:24px; }
+  a.back-link { display:inline-flex; align-items:center; gap:6px; color:var(--muted); text-decoration:none; font-size:13px; margin-bottom:18px; }
+  a.back-link:hover { color:var(--text); }
+  a.back-link::before { content:'←'; }
+  .card { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:20px; margin-bottom:20px; }
+  .section-header { display:flex; align-items:center; gap:10px; margin-bottom:14px; }
+  .section-header h2 { font-size:13px; font-weight:600; text-transform:uppercase; letter-spacing:.8px; color:var(--muted); }
+  label { font-size:12px; color:var(--muted); font-weight:500; }
+  .form-group { display:flex; flex-direction:column; gap:6px; margin-bottom:12px; }
+  .form-row { display:flex; gap:12px; flex-wrap:wrap; }
+  .form-row .form-group { flex:1; min-width:180px; }
+  input, select, textarea { background:var(--bg); border:1px solid var(--border); border-radius:6px; color:var(--text); font-size:13px; padding:8px 10px; outline:none; width:100%; font-family:inherit; }
+  input:focus, select:focus, textarea:focus { border-color:var(--accent); }
+  textarea { resize:vertical; font-family:var(--mono); font-size:12px; }
+  select option { background:var(--surface); }
+  button { cursor:pointer; border:none; border-radius:6px; font-size:13px; font-weight:600; padding:8px 18px; transition:opacity .15s; }
+  button:hover { opacity:.85; }
+  button:disabled { opacity:.4; cursor:not-allowed; }
+  .btn-primary { background:var(--accent); color:#fff; }
+  .btn-sm { padding:4px 10px; font-size:12px; font-weight:500; }
+  .btn-ghost { background:transparent; border:1px solid var(--border); color:var(--text); }
+  .btn-danger-sm { background:transparent; border:1px solid var(--red); color:var(--red); }
+  .btn-green-sm { background:transparent; border:1px solid var(--green); color:var(--green); }
+  a.btn-ghost { text-decoration:none; display:inline-flex; align-items:center; }
+  table { width:100%; border-collapse:collapse; }
+  th { text-align:left; font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.6px; color:var(--muted); padding:8px 12px; border-bottom:1px solid var(--border); white-space:nowrap; }
+  td { padding:10px 12px; border-bottom:1px solid var(--border); vertical-align:top; }
+  tr:last-child td { border-bottom:none; }
+  tr:hover td { background:rgba(255,255,255,.02); }
+  .url-mono { font-family:var(--mono); font-size:12px; }
+  .badge { display:inline-flex; align-items:center; gap:4px; border-radius:4px; padding:2px 7px; font-size:11px; font-weight:600; text-transform:uppercase; }
+  .badge::before { content:''; width:5px; height:5px; border-radius:50%; background:currentColor; flex-shrink:0; }
+  .badge-enabled { color:var(--green); background:rgba(62,207,142,.12); }
+  .badge-disabled { color:var(--muted); background:rgba(122,127,153,.12); }
+  .actions { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
+  .empty-state { text-align:center; padding:40px; color:var(--muted); }
+  .schedule-row { background:rgba(0,0,0,.2); }
+  .schedule-row td { padding:8px 12px; font-size:12px; }
+  .cron-hint { font-size:11px; color:var(--muted); margin-top:4px; }
+  .window-badge { font-family:var(--mono); font-size:11px; color:var(--accent); background:rgba(91,141,238,.1); padding:2px 6px; border-radius:3px; }
+  .toast { position:fixed; bottom:24px; right:24px; background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:12px 16px; font-size:13px; box-shadow:0 4px 20px rgba(0,0,0,.4); z-index:999; display:none; max-width:340px; }
+  .toast.show { display:block; }
+  .toast.error { border-color:var(--red); color:var(--red); }
+  .toast.success { border-color:var(--green); color:var(--green); }
+  .collapsible { display:none; }
+  .collapsible.open { display:table-row-group; }
+</style>
+</head>
+<body>
+<header>
+  <div class="dot"></div>
+  <h1>Web Security Scanner</h1>
+  <span class="sub">Targets &amp; Schedules</span>
+</header>
+<main>
+  <a class="back-link" href="/ui/">All Jobs</a>
+
+  <!-- New Target Form -->
+  <div class="card" id="new-target-card">
+    <div class="section-header">
+      <h2>New Target</h2>
+    </div>
+    <div class="form-row">
+      <div class="form-group" style="flex:0 0 200px">
+        <label for="t-name">Name</label>
+        <input id="t-name" type="text" placeholder="Production API">
+      </div>
+      <div class="form-group" style="flex:2">
+        <label for="t-url">Target URL</label>
+        <input id="t-url" type="url" placeholder="https://example.com">
+      </div>
+      <div class="form-group" style="flex:0 0 140px">
+        <label for="t-profile">Profile</label>
+        <select id="t-profile">
+          <option value="passive">Passive</option>
+          <option value="active">Active</option>
+          <option value="full">Full</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-group">
+      <label for="t-scope">Scope (one URL/pattern per line, optional)</label>
+      <textarea id="t-scope" rows="2" placeholder="https://example.com/*&#10;https://api.example.com/*"></textarea>
+    </div>
+    <button class="btn-primary" onclick="createTarget()">Add Target</button>
+  </div>
+
+  <!-- Targets Table -->
+  <div class="section-header">
+    <h2>Targets</h2>
+  </div>
+  <div class="card" style="padding:0;overflow:hidden">
+    <table id="targets-table">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>URL</th>
+          <th>Profile</th>
+          <th>Schedules</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="targets-tbody">
+        <tr><td colspan="5" class="empty-state">Loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Add Schedule Form (hidden, shown per target) -->
+  <div id="sched-form-card" class="card" style="display:none">
+    <div class="section-header">
+      <h2 id="sched-form-title">Add Schedule</h2>
+    </div>
+    <input type="hidden" id="sched-target-id">
+    <input type="hidden" id="sched-edit-id">
+    <div class="form-row">
+      <div class="form-group" style="flex:0 0 200px">
+        <label for="sched-preset">Preset</label>
+        <select id="sched-preset" onchange="applyPreset()">
+          <option value="">— choose —</option>
+          <option value="0 2 * * *">Daily at 02:00 UTC</option>
+          <option value="0 3 * * 1">Weekly Mon 03:00 UTC</option>
+          <option value="0 4 * * 0">Weekly Sun 04:00 UTC</option>
+          <option value="0 1 1 * *">Monthly 1st 01:00 UTC</option>
+          <option value="custom">Custom…</option>
+        </select>
+      </div>
+      <div class="form-group" style="flex:1">
+        <label for="sched-cron">Cron Expression</label>
+        <input id="sched-cron" type="text" placeholder="0 2 * * *">
+        <span class="cron-hint">minute hour day-of-month month day-of-week (UTC)</span>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group" style="flex:0 0 160px">
+        <label for="sched-wstart">Window Start (HH:MM UTC, optional)</label>
+        <input id="sched-wstart" type="text" placeholder="02:00">
+      </div>
+      <div class="form-group" style="flex:0 0 160px">
+        <label for="sched-wend">Window End (HH:MM UTC)</label>
+        <input id="sched-wend" type="text" placeholder="06:00">
+      </div>
+      <div class="form-group" style="flex:0 0 120px; align-self:flex-end">
+        <label>&nbsp;</label>
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+          <input type="checkbox" id="sched-enabled" checked style="width:auto">
+          Enabled
+        </label>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn-primary btn-sm" onclick="saveSchedule()">Save Schedule</button>
+      <button class="btn-ghost btn-sm" onclick="closeSchedForm()">Cancel</button>
+    </div>
+  </div>
+</main>
+<div class="toast" id="toast"></div>
+<script>
+'use strict';
+
+let targets = [];
+let expandedTargets = new Set();
+
+// ── Boot ─────────────────────────────────────────────────────────────────────
+loadTargets();
+
+// ── Load & Render ─────────────────────────────────────────────────────────────
+async function loadTargets() {
+  try {
+    const resp = await fetch('/targets');
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    targets = await resp.json();
+    renderTargets();
+  } catch(e) {
+    document.getElementById('targets-tbody').innerHTML =
+      `<tr><td colspan="5" class="empty-state" style="color:var(--red)">Failed to load: ${esc(e.message)}</td></tr>`;
+  }
+}
+
+function renderTargets() {
+  const tbody = document.getElementById('targets-tbody');
+  if (!targets || targets.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="5" class="empty-state">No targets yet. Add one above.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = targets.flatMap(t => {
+    const schedCount = (t.schedules || []).length;
+    const isExpanded = expandedTargets.has(t.id);
+    const mainRow = `<tr>
+      <td><strong>${esc(t.name)}</strong></td>
+      <td><span class="url-mono">${esc(t.target_url)}</span></td>
+      <td>${esc(t.scan_profile)}</td>
+      <td>
+        <button class="btn-ghost btn-sm" onclick="toggleSchedules('${t.id}')">
+          ${schedCount} schedule${schedCount !== 1 ? 's' : ''} ${isExpanded ? '▲' : '▼'}
+        </button>
+      </td>
+      <td>
+        <div class="actions">
+          <button class="btn-green-sm btn-sm" onclick="scanNow('${t.id}')">▶ Scan Now</button>
+          <button class="btn-ghost btn-sm" onclick="showSchedForm('${t.id}')">+ Schedule</button>
+          <button class="btn-danger-sm btn-sm" onclick="deleteTarget('${t.id}', '${esc(t.name)}')">Delete</button>
+        </div>
+      </td>
+    </tr>`;
+
+    const schedRows = isExpanded
+      ? (t.schedules || []).map(sc => scheduleRow(sc)).join('') +
+        `<tr class="schedule-row"><td colspan="5">
+          <button class="btn-ghost btn-sm" onclick="showSchedForm('${t.id}')">+ Add Schedule</button>
+        </td></tr>`
+      : '';
+
+    return [mainRow, schedRows];
+  }).join('');
+}
+
+function scheduleRow(sc) {
+  const window = sc.window_start
+    ? `<span class="window-badge">${esc(sc.window_start)}–${esc(sc.window_end)}</span>`
+    : '<span style="color:var(--muted)">no window</span>';
+  const badge = sc.enabled
+    ? '<span class="badge badge-enabled">enabled</span>'
+    : '<span class="badge badge-disabled">disabled</span>';
+  const next = sc.next_run_at ? relativeTime(sc.next_run_at) : '—';
+
+  return `<tr class="schedule-row">
+    <td style="padding-left:28px">
+      <code style="font-family:var(--mono);font-size:11px">${esc(sc.cron_expr)}</code>
+    </td>
+    <td>${window}</td>
+    <td>${badge}</td>
+    <td style="color:var(--muted);font-size:12px">Next: ${next}</td>
+    <td>
+      <div class="actions">
+        <button class="btn-ghost btn-sm" onclick="toggleEnabled('${sc.id}', ${!sc.enabled})">${sc.enabled ? 'Disable' : 'Enable'}</button>
+        <button class="btn-danger-sm btn-sm" onclick="deleteSchedule('${sc.id}')">Delete</button>
+      </div>
+    </td>
+  </tr>`;
+}
+
+// ── Targets ───────────────────────────────────────────────────────────────────
+async function createTarget() {
+  const name    = document.getElementById('t-name').value.trim();
+  const url     = document.getElementById('t-url').value.trim();
+  const profile = document.getElementById('t-profile').value;
+  const scopeRaw = document.getElementById('t-scope').value.trim();
+  if (!name) { showToast('Name is required', 'error'); return; }
+  if (!url)  { showToast('Target URL is required', 'error'); return; }
+  const scope = scopeRaw ? scopeRaw.split('\n').map(s => s.trim()).filter(Boolean) : [];
+  try {
+    const resp = await fetch('/targets', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name, target_url: url, scan_profile: profile, scope}),
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+    document.getElementById('t-name').value = '';
+    document.getElementById('t-url').value  = '';
+    document.getElementById('t-scope').value = '';
+    showToast(`Target '${name}' created`, 'success');
+    await loadTargets();
+  } catch(e) {
+    showToast('Create failed: ' + e.message, 'error');
+  }
+}
+
+async function deleteTarget(id, name) {
+  if (!confirm(`Delete target '${name}' and all its schedules?`)) return;
+  try {
+    const resp = await fetch(`/targets/${id}`, {method:'DELETE'});
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    showToast('Target deleted', 'success');
+    await loadTargets();
+  } catch(e) {
+    showToast('Delete failed: ' + e.message, 'error');
+  }
+}
+
+async function scanNow(targetId) {
+  try {
+    const resp = await fetch(`/targets/${targetId}/scan`, {method:'POST'});
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+    showToast('Scan started — ' + data.job_id.slice(0,8), 'success');
+  } catch(e) {
+    showToast('Scan failed: ' + e.message, 'error');
+  }
+}
+
+function toggleSchedules(targetId) {
+  if (expandedTargets.has(targetId)) {
+    expandedTargets.delete(targetId);
+  } else {
+    expandedTargets.add(targetId);
+  }
+  renderTargets();
+}
+
+// ── Schedules ─────────────────────────────────────────────────────────────────
+function showSchedForm(targetId, sc) {
+  document.getElementById('sched-target-id').value = targetId;
+  document.getElementById('sched-edit-id').value   = sc ? sc.id : '';
+  document.getElementById('sched-form-title').textContent = sc ? 'Edit Schedule' : 'Add Schedule';
+  document.getElementById('sched-preset').value = '';
+  document.getElementById('sched-cron').value   = sc ? sc.cron_expr : '';
+  document.getElementById('sched-wstart').value = sc ? (sc.window_start || '') : '';
+  document.getElementById('sched-wend').value   = sc ? (sc.window_end || '') : '';
+  document.getElementById('sched-enabled').checked = sc ? sc.enabled : true;
+  document.getElementById('sched-form-card').style.display = 'block';
+  document.getElementById('sched-form-card').scrollIntoView({behavior:'smooth', block:'start'});
+}
+
+function closeSchedForm() {
+  document.getElementById('sched-form-card').style.display = 'none';
+}
+
+function applyPreset() {
+  const val = document.getElementById('sched-preset').value;
+  if (val && val !== 'custom') {
+    document.getElementById('sched-cron').value = val;
+  }
+}
+
+async function saveSchedule() {
+  const targetId = document.getElementById('sched-target-id').value;
+  const editId   = document.getElementById('sched-edit-id').value;
+  const cronExpr = document.getElementById('sched-cron').value.trim();
+  const wstart   = document.getElementById('sched-wstart').value.trim();
+  const wend     = document.getElementById('sched-wend').value.trim();
+  const enabled  = document.getElementById('sched-enabled').checked;
+
+  if (!cronExpr) { showToast('Cron expression is required', 'error'); return; }
+
+  const body = {cron_expr: cronExpr, window_start: wstart, window_end: wend, enabled};
+  try {
+    let resp;
+    if (editId) {
+      resp = await fetch(`/schedules/${editId}`, {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(body),
+      });
+    } else {
+      resp = await fetch(`/targets/${targetId}/schedules`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(body),
+      });
+    }
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+    showToast('Schedule saved', 'success');
+    closeSchedForm();
+    expandedTargets.add(targetId);
+    await loadTargets();
+  } catch(e) {
+    showToast('Save failed: ' + e.message, 'error');
+  }
+}
+
+async function toggleEnabled(schedId, newState) {
+  try {
+    const resp = await fetch(`/schedules/${schedId}/enabled`, {
+      method: 'PATCH',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({enabled: newState}),
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    showToast(newState ? 'Schedule enabled' : 'Schedule disabled', 'success');
+    await loadTargets();
+  } catch(e) {
+    showToast('Update failed: ' + e.message, 'error');
+  }
+}
+
+async function deleteSchedule(schedId) {
+  if (!confirm('Delete this schedule?')) return;
+  try {
+    const resp = await fetch(`/schedules/${schedId}`, {method:'DELETE'});
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    showToast('Schedule deleted', 'success');
+    await loadTargets();
+  } catch(e) {
+    showToast('Delete failed: ' + e.message, 'error');
+  }
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function relativeTime(iso) {
+  if (!iso) return '—';
+  const diff = new Date(iso).getTime() - Date.now();
+  const s = Math.floor(Math.abs(diff) / 1000);
+  const future = diff > 0;
+  const label = s < 60 ? s + 's' : s < 3600 ? Math.floor(s/60) + 'm' : s < 86400 ? Math.floor(s/3600) + 'h' : Math.floor(s/86400) + 'd';
+  return future ? 'in ' + label : label + ' ago';
+}
+
+function showToast(msg, type = 'success') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = `toast show ${type}`;
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => t.classList.remove('show'), 4000);
+}
+
+function esc(str) {
+  return String(str ?? '')
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;');
+}
+</script>
+</body>
+</html>

@@ -42,6 +42,8 @@
   header h1 { font-size: 16px; font-weight: 600; letter-spacing: .3px; }
   header .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 6px var(--green); }
   header .sub { color: var(--muted); font-size: 12px; margin-left: auto; }
+  header a.nav { color: var(--muted); text-decoration: none; font-size: 12px; padding: 4px 10px; border: 1px solid var(--border); border-radius: 6px; transition: color .15s, border-color .15s; }
+  header a.nav:hover { color: var(--text); border-color: var(--text); }
 
   main { max-width: 1200px; margin: 0 auto; padding: 24px; }
 
@@ -225,6 +227,7 @@
 <header>
   <div class="dot"></div>
   <h1>Web Security Scanner</h1>
+  <a class="nav" href="/ui/targets.html">Targets &amp; Schedules</a>
   <span class="sub" id="last-refresh"></span>
 </header>
 

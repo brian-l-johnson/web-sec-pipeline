@@ -55,6 +55,7 @@ type JobLogStreamer interface {
 // Handler holds shared dependencies for the HTTP handlers.
 type Handler struct {
 	store        Storer
+	targetStore  TargetStorer
 	retriggerer  JobRetriggerer
 	submitter    JobSubmitter
 	reparserer   FindingsReparserer
@@ -70,8 +71,8 @@ func (h *Handler) AddHealthCheck(fn func(ctx context.Context) error) {
 }
 
 // NewHandler creates a Handler.
-func NewHandler(s Storer, r JobRetriggerer, sub JobSubmitter, rep FindingsReparserer, ls JobLogStreamer, dataDir string) *Handler {
-	return &Handler{store: s, retriggerer: r, submitter: sub, reparserer: rep, logStreamer: ls, dataDir: dataDir}
+func NewHandler(s Storer, ts TargetStorer, r JobRetriggerer, sub JobSubmitter, rep FindingsReparserer, ls JobLogStreamer, dataDir string) *Handler {
+	return &Handler{store: s, targetStore: ts, retriggerer: r, submitter: sub, reparserer: rep, logStreamer: ls, dataDir: dataDir}
 }
 
 // RegisterRoutes wires all routes into mux.
@@ -86,6 +87,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /jobs/{id}/logs", h.LogsHandler)
 	mux.HandleFunc("POST /jobs/{id}/reparse-findings", h.ReparseHandler)
 	mux.HandleFunc("POST /jobs/{id}/retrigger", h.RetriggerHandler)
+	h.registerTargetRoutes(mux)
 }
 
 // writeJSON writes a JSON-encoded value with the given HTTP status code.

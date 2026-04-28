@@ -23,20 +23,23 @@ type FindingsSummary struct {
 
 // WebJob represents a row in the web_jobs table.
 type WebJob struct {
-	ID           uuid.UUID
-	Status       string // pending, running, complete, failed
-	TargetURL    string
-	Scope        []string
-	AuthConfig   json.RawMessage // nullable
-	ScanProfile  string          // passive, active, full
-	SubmittedAt  time.Time
-	StartedAt    *time.Time
-	CompletedAt  *time.Time
-	Error        *string
-	HARPath      *string
-	CrawlStatus  string
-	ZAPStatus    string
-	NucleiStatus string
+	ID              uuid.UUID
+	Status          string // pending, running, complete, failed
+	TargetURL       string
+	Scope           []string
+	AuthConfig      json.RawMessage // nullable
+	ScanProfile     string          // passive, active, full
+	SubmittedAt     time.Time
+	StartedAt       *time.Time
+	CompletedAt     *time.Time
+	Error           *string
+	HARPath         *string
+	CrawlStatus     string
+	ZAPStatus       string
+	NucleiStatus    string
+	TargetID        *uuid.UUID  // set when job was launched from a stored target
+	ScheduleID      *uuid.UUID  // set when job was launched by a schedule
+	WindowExpiresAt *time.Time  // scan is killed after this time if still running
 }
 
 // WebFinding represents a row in the web_findings table.
@@ -65,13 +68,16 @@ func (s *Store) CreateJob(ctx context.Context, job WebJob) error {
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO web_jobs (
 			id, status, target_url, scope, auth_config, scan_profile,
-			submitted_at, crawl_status, zap_status, nuclei_status
+			submitted_at, crawl_status, zap_status, nuclei_status,
+			target_id, schedule_id, window_expires_at
 		) VALUES (
 			$1, $2, $3, $4, $5, $6,
-			$7, $8, $9, $10
+			$7, $8, $9, $10,
+			$11, $12, $13
 		)`,
 		job.ID, job.Status, job.TargetURL, job.Scope, authConfig, job.ScanProfile,
 		job.SubmittedAt, job.CrawlStatus, job.ZAPStatus, job.NucleiStatus,
+		job.TargetID, job.ScheduleID, job.WindowExpiresAt,
 	)
 	if err != nil {
 		return fmt.Errorf("create job: %w", err)
@@ -396,8 +402,12 @@ func (s *Store) ListFindingsSummaries(ctx context.Context, jobIDs []uuid.UUID) (
 	return result, rows.Err()
 }
 
-// scanJob scans a single web_jobs row from a pgx.Row or pgx.Rows.
+// scanJob scans a single web_jobs row that includes target_id/schedule_id/window_expires_at.
 func scanJob(row pgx.Row) (*WebJob, error) {
+	return scanJobFull(row)
+}
+
+func scanJobFull(row pgx.Row) (*WebJob, error) {
 	var job WebJob
 	var authConfigBytes []byte
 
@@ -405,6 +415,7 @@ func scanJob(row pgx.Row) (*WebJob, error) {
 		&job.ID, &job.Status, &job.TargetURL, &job.Scope, &authConfigBytes, &job.ScanProfile,
 		&job.SubmittedAt, &job.StartedAt, &job.CompletedAt, &job.Error, &job.HARPath,
 		&job.CrawlStatus, &job.ZAPStatus, &job.NucleiStatus,
+		&job.TargetID, &job.ScheduleID, &job.WindowExpiresAt,
 	)
 	if err != nil {
 		return nil, err

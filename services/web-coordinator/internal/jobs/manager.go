@@ -199,6 +199,22 @@ func (m *Manager) setSecretOwner(ctx context.Context, secretName string, job *ba
 	return err
 }
 
+// CancelJob deletes all k8s Jobs for the given scan, terminating any running
+// pods immediately. Errors are logged but do not prevent other tools being
+// cancelled. Used for scan-window enforcement.
+func (m *Manager) CancelJob(ctx context.Context, jobID uuid.UUID) {
+	bg := metav1.DeletePropagationBackground
+	for _, tool := range []string{"crawl", "zap", "nuclei"} {
+		name := fmt.Sprintf("web-%s-%s", tool, jobID)
+		err := m.clientset.BatchV1().Jobs(m.namespace).Delete(ctx, name, metav1.DeleteOptions{
+			PropagationPolicy: &bg,
+		})
+		if err != nil && !k8serrors.IsNotFound(err) {
+			log.Printf("jobs: cancel %s for job %s: %v", tool, jobID, err)
+		}
+	}
+}
+
 // Healthy returns true if the underlying Kubernetes API is reachable.
 func (m *Manager) Healthy() bool {
 	_, err := m.clientset.Discovery().ServerVersion()
