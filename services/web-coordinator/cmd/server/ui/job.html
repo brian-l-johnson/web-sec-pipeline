@@ -449,6 +449,7 @@
       <div class="view-toggle">
         <button id="btn-list" class="view-btn active" onclick="setView('list')">List</button>
         <button id="btn-tree" class="view-btn"        onclick="setView('tree')">Tree</button>
+        <button id="btn-cwe"  class="view-btn"        onclick="setView('cwe')">CWE</button>
       </div>
     </div>
 
@@ -513,9 +514,11 @@ let jobData         = null;
 let allFindings     = [];
 let pollTimer       = null;
 let prevToolStatuses = {};
-let currentView     = 'list';
-let treeRoot        = null;
-let selectedTreePath = null; // null = all findings
+let currentView      = 'list';
+let treeRoot         = null;
+let cweGroups        = null;
+let selectedTreePath = null; // null = all findings (tree view)
+let selectedCWE      = null; // null = all findings (cwe view)
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
 
@@ -636,8 +639,10 @@ async function loadFindings() {
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
     allFindings = data.findings || [];
-    treeRoot = buildTree(allFindings);
+    treeRoot  = buildTree(allFindings);
+    cweGroups = buildCWEGroups(allFindings);
     if (currentView === 'tree') renderTreePanel(treeRoot);
+    else if (currentView === 'cwe') renderCWEPanel(cweGroups);
     applyFindingFilters();
   } catch (e) {
     document.getElementById('findings-tbody').innerHTML =
@@ -655,13 +660,17 @@ function applyFindingFilters() {
   const ev    = document.getElementById('ff-ev').value.toLowerCase();
 
   const filtered = allFindings.filter(f => {
-    // Tree path filter — check finding URL is under the selected path segment.
+    // Tree path filter
     if (selectedTreePath !== null) {
       try {
         const u  = new URL(f.url);
         const fp = '/' + u.host + u.pathname;
         if (fp !== selectedTreePath && !fp.startsWith(selectedTreePath + '/')) return false;
       } catch { return false; }
+    }
+    // CWE group filter
+    if (selectedCWE !== null) {
+      if (selectedCWE === 'none' ? f.cwe != null : f.cwe !== selectedCWE) return false;
     }
     if (sev   && f.severity !== sev)                                           return false;
     if (title && !f.title.toLowerCase().includes(title))                       return false;
@@ -748,12 +757,20 @@ function setView(view) {
   currentView = view;
   document.getElementById('btn-list').classList.toggle('active', view === 'list');
   document.getElementById('btn-tree').classList.toggle('active', view === 'tree');
+  document.getElementById('btn-cwe').classList.toggle('active',  view === 'cwe');
+
   const layout = document.getElementById('findings-layout');
-  layout.classList.toggle('tree-view', view === 'tree');
+  layout.classList.toggle('tree-view', view !== 'list');
+
   if (view === 'tree') {
+    selectedCWE = null;
     if (treeRoot) renderTreePanel(treeRoot);
+  } else if (view === 'cwe') {
+    selectedTreePath = null;
+    if (cweGroups) renderCWEPanel(cweGroups);
   } else {
     selectedTreePath = null;
+    selectedCWE      = null;
   }
   applyFindingFilters();
 }
@@ -862,6 +879,67 @@ function selectTreePath(path) {
   selectedTreePath = path;
   document.querySelectorAll('#tree-root .tree-row').forEach(r => {
     const match = path === null ? r.dataset.path === '' : r.dataset.path === path;
+    r.classList.toggle('selected', match);
+  });
+  applyFindingFilters();
+}
+
+// ── CWE view ──────────────────────────────────────────────────────────────────
+
+function buildCWEGroups(findings) {
+  const map = new Map();
+  for (const f of findings) {
+    const key = f.cwe != null ? f.cwe : 'none';
+    if (!map.has(key)) map.set(key, { cwe: key, findings: [] });
+    map.get(key).findings.push(f);
+  }
+
+  const sevOrder = { critical: 0, high: 1, medium: 2, low: 3, info: 4 };
+  const groups = Array.from(map.values()).map(g => ({
+    ...g,
+    topSev: ['critical','high','medium','low','info'].find(s => g.findings.some(f => f.severity === s)) || null,
+  }));
+
+  groups.sort((a, b) => {
+    if (a.cwe === 'none') return 1;
+    if (b.cwe === 'none') return -1;
+    const sa = sevOrder[a.topSev] ?? 5;
+    const sb = sevOrder[b.topSev] ?? 5;
+    return sa !== sb ? sa - sb : b.findings.length - a.findings.length;
+  });
+
+  return groups;
+}
+
+function renderCWEPanel(groups) {
+  const container = document.getElementById('tree-root');
+  container.innerHTML = '';
+
+  const topSev = ['critical','high','medium','low','info'].find(s => allFindings.some(f => f.severity === s)) || null;
+  const allRow = makeTreeRow('', 'All CWEs', allFindings.length, topSev, selectedCWE === null, false);
+  allRow.querySelector('.tree-label').style.color      = 'var(--muted)';
+  allRow.querySelector('.tree-label').style.fontStyle  = 'italic';
+  allRow.addEventListener('click', () => selectCWEGroup(null));
+  container.appendChild(allRow);
+
+  const ul = document.createElement('ul');
+  ul.className = 'tree-list';
+  for (const g of groups) {
+    const li    = document.createElement('li');
+    li.className = 'tree-node';
+    const label = g.cwe === 'none' ? 'No CWE' : `CWE-${g.cwe}`;
+    const row   = makeTreeRow(String(g.cwe), label, g.findings.length, g.topSev, selectedCWE === g.cwe, false);
+    row.addEventListener('click', () => selectCWEGroup(g.cwe));
+    li.appendChild(row);
+    ul.appendChild(li);
+  }
+  container.appendChild(ul);
+}
+
+function selectCWEGroup(cwe) {
+  selectedCWE = cwe;
+  document.querySelectorAll('#tree-root .tree-row').forEach(r => {
+    const match = cwe === null ? r.dataset.path === '' : r.dataset.path === String(cwe);
     r.classList.toggle('selected', match);
   });
   applyFindingFilters();
