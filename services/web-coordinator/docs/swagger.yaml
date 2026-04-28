@@ -196,6 +196,37 @@ paths:
       summary: Get a scan job by ID
       tags:
       - jobs
+  /jobs/{id}/artifacts/{tool}:
+    get:
+      parameters:
+      - description: Job UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Tool (zap, nuclei, crawl)
+        in: path
+        name: tool
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Download raw scanner output
+      tags:
+      - jobs
   /jobs/{id}/findings:
     get:
       parameters:

@@ -129,7 +129,7 @@ func (m *mockLogStreamer) StreamJobLogs(_ context.Context, _ uuid.UUID, out chan
 }
 
 func newTestHandler(s Storer, r JobRetriggerer) *Handler {
-	return NewHandler(s, r, &mockSubmitter{}, &mockReparserer{}, &mockLogStreamer{})
+	return NewHandler(s, r, &mockSubmitter{}, &mockReparserer{}, &mockLogStreamer{}, "")
 }
 
 func doRequest(t *testing.T, h *Handler, method, path string) *httptest.ResponseRecorder {
@@ -390,7 +390,7 @@ func TestReparseHandler_Success(t *testing.T) {
 	s.jobs[job.ID] = job
 
 	mux := http.NewServeMux()
-	h := NewHandler(s, &mockRetriggerer{}, &mockSubmitter{}, &mockReparserer{zapFindings: 3, nucleiFindings: 2}, &mockLogStreamer{})
+	h := NewHandler(s, &mockRetriggerer{}, &mockSubmitter{}, &mockReparserer{zapFindings: 3, nucleiFindings: 2}, &mockLogStreamer{}, "")
 	h.RegisterRoutes(mux)
 
 	req := httptest.NewRequest(http.MethodPost, "/jobs/"+job.ID.String()+"/reparse-findings", nil)
@@ -415,7 +415,7 @@ func TestReparseHandler_Success(t *testing.T) {
 
 func TestReparseHandler_JobNotFound(t *testing.T) {
 	mux := http.NewServeMux()
-	h := NewHandler(newMockStore(), &mockRetriggerer{}, &mockSubmitter{}, &mockReparserer{}, &mockLogStreamer{})
+	h := NewHandler(newMockStore(), &mockRetriggerer{}, &mockSubmitter{}, &mockReparserer{}, &mockLogStreamer{}, "")
 	h.RegisterRoutes(mux)
 
 	req := httptest.NewRequest(http.MethodPost, "/jobs/"+uuid.NewString()+"/reparse-findings", nil)
@@ -429,7 +429,7 @@ func TestReparseHandler_JobNotFound(t *testing.T) {
 
 func TestReparseHandler_InvalidID(t *testing.T) {
 	mux := http.NewServeMux()
-	h := NewHandler(newMockStore(), &mockRetriggerer{}, &mockSubmitter{}, &mockReparserer{}, &mockLogStreamer{})
+	h := NewHandler(newMockStore(), &mockRetriggerer{}, &mockSubmitter{}, &mockReparserer{}, &mockLogStreamer{}, "")
 	h.RegisterRoutes(mux)
 
 	req := httptest.NewRequest(http.MethodPost, "/jobs/not-a-uuid/reparse-findings", nil)
@@ -441,13 +441,46 @@ func TestReparseHandler_InvalidID(t *testing.T) {
 	}
 }
 
+func TestArtifactHandler_NotFound(t *testing.T) {
+	s := newMockStore()
+	job := makeJob("complete")
+	s.jobs[job.ID] = job
+
+	// dataDir="" so the file path won't exist → 404 artifact
+	h := newTestHandler(s, &mockRetriggerer{})
+	rec := doRequest(t, h, http.MethodGet, "/jobs/"+job.ID.String()+"/artifacts/zap")
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", rec.Code)
+	}
+}
+
+func TestArtifactHandler_InvalidTool(t *testing.T) {
+	s := newMockStore()
+	job := makeJob("complete")
+	s.jobs[job.ID] = job
+
+	h := newTestHandler(s, &mockRetriggerer{})
+	rec := doRequest(t, h, http.MethodGet, "/jobs/"+job.ID.String()+"/artifacts/unknown")
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", rec.Code)
+	}
+}
+
+func TestArtifactHandler_JobNotFound(t *testing.T) {
+	h := newTestHandler(newMockStore(), &mockRetriggerer{})
+	rec := doRequest(t, h, http.MethodGet, "/jobs/"+uuid.NewString()+"/artifacts/zap")
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", rec.Code)
+	}
+}
+
 func TestLogsHandler_OK(t *testing.T) {
 	s := newMockStore()
 	job := makeJob("running")
 	s.jobs[job.ID] = job
 
 	mux := http.NewServeMux()
-	h := NewHandler(s, &mockRetriggerer{}, &mockSubmitter{}, &mockReparserer{}, &mockLogStreamer{})
+	h := NewHandler(s, &mockRetriggerer{}, &mockSubmitter{}, &mockReparserer{}, &mockLogStreamer{}, "")
 	h.RegisterRoutes(mux)
 
 	req := httptest.NewRequest(http.MethodGet, "/jobs/"+job.ID.String()+"/logs", nil)
@@ -467,7 +500,7 @@ func TestLogsHandler_OK(t *testing.T) {
 
 func TestLogsHandler_NotFound(t *testing.T) {
 	mux := http.NewServeMux()
-	h := NewHandler(newMockStore(), &mockRetriggerer{}, &mockSubmitter{}, &mockReparserer{}, &mockLogStreamer{})
+	h := NewHandler(newMockStore(), &mockRetriggerer{}, &mockSubmitter{}, &mockReparserer{}, &mockLogStreamer{}, "")
 	h.RegisterRoutes(mux)
 
 	req := httptest.NewRequest(http.MethodGet, "/jobs/"+uuid.NewString()+"/logs", nil)
@@ -485,7 +518,7 @@ func TestReparseHandler_ReparserError(t *testing.T) {
 	s.jobs[job.ID] = job
 
 	mux := http.NewServeMux()
-	h := NewHandler(s, &mockRetriggerer{}, &mockSubmitter{}, &mockReparserer{err: fmt.Errorf("db error")}, &mockLogStreamer{})
+	h := NewHandler(s, &mockRetriggerer{}, &mockSubmitter{}, &mockReparserer{err: fmt.Errorf("db error")}, &mockLogStreamer{}, "")
 	h.RegisterRoutes(mux)
 
 	req := httptest.NewRequest(http.MethodPost, "/jobs/"+job.ID.String()+"/reparse-findings", nil)

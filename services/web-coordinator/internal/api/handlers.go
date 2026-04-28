@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -54,11 +56,12 @@ type Handler struct {
 	submitter   JobSubmitter
 	reparserer  FindingsReparserer
 	logStreamer  JobLogStreamer
+	dataDir     string
 }
 
 // NewHandler creates a Handler.
-func NewHandler(s Storer, r JobRetriggerer, sub JobSubmitter, rep FindingsReparserer, ls JobLogStreamer) *Handler {
-	return &Handler{store: s, retriggerer: r, submitter: sub, reparserer: rep, logStreamer: ls}
+func NewHandler(s Storer, r JobRetriggerer, sub JobSubmitter, rep FindingsReparserer, ls JobLogStreamer, dataDir string) *Handler {
+	return &Handler{store: s, retriggerer: r, submitter: sub, reparserer: rep, logStreamer: ls, dataDir: dataDir}
 }
 
 // RegisterRoutes wires all routes into mux.
@@ -68,6 +71,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /jobs", h.SubmitJobHandler)
 	mux.HandleFunc("GET /jobs/{id}", h.GetJobHandler)
 	mux.HandleFunc("GET /jobs/{id}/findings", h.ListFindingsHandler)
+	mux.HandleFunc("GET /jobs/{id}/artifacts/{tool}", h.ArtifactHandler)
 	mux.HandleFunc("GET /jobs/{id}/logs", h.LogsHandler)
 	mux.HandleFunc("POST /jobs/{id}/reparse-findings", h.ReparseHandler)
 	mux.HandleFunc("POST /jobs/{id}/retrigger", h.RetriggerHandler)
@@ -395,6 +399,66 @@ func (h *Handler) ListFindingsHandler(w http.ResponseWriter, r *http.Request) {
 		resp.Findings[i] = findingToResponse(&findings[i])
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// ArtifactHandler handles GET /jobs/{id}/artifacts/{tool}.
+// Serves the raw scanner output file as a download.
+//
+// @Summary      Download raw scanner output
+// @Tags         jobs
+// @Param        id    path  string  true  "Job UUID"
+// @Param        tool  path  string  true  "Tool (zap, nuclei, crawl)"
+// @Success      200
+// @Failure      400  {object}  map[string]string
+// @Failure      404  {object}  map[string]string
+// @Router       /jobs/{id}/artifacts/{tool} [get]
+func (h *Handler) ArtifactHandler(w http.ResponseWriter, r *http.Request) {
+	jobID, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid job ID")
+		return
+	}
+
+	type artifactSpec struct {
+		path        string
+		filename    string
+		contentType string
+	}
+	specs := map[string]artifactSpec{
+		"zap":    {fmt.Sprintf("%s/output/%s/zap/report.json", h.dataDir, jobID), fmt.Sprintf("zap-report-%s.json", jobID.String()[:8]), "application/json"},
+		"nuclei": {fmt.Sprintf("%s/output/%s/nuclei/nuclei.jsonl", h.dataDir, jobID), fmt.Sprintf("nuclei-%s.jsonl", jobID.String()[:8]), "application/json"},
+		"crawl":  {fmt.Sprintf("%s/output/%s/crawl/capture.har", h.dataDir, jobID), fmt.Sprintf("crawl-%s.har", jobID.String()[:8]), "application/json"},
+	}
+
+	spec, ok := specs[r.PathValue("tool")]
+	if !ok {
+		writeError(w, http.StatusBadRequest, "tool must be one of: zap, nuclei, crawl")
+		return
+	}
+
+	if _, err := h.store.GetJob(r.Context(), jobID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "job not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "getting job: "+err.Error())
+		return
+	}
+
+	f, err := os.Open(spec.path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			writeError(w, http.StatusNotFound, "artifact not available — scan may not have completed yet")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "opening artifact: "+err.Error())
+		return
+	}
+	defer f.Close()
+
+	w.Header().Set("Content-Type", spec.contentType)
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, spec.filename))
+	io.Copy(w, f) //nolint:errcheck
 }
 
 // LogsHandler handles GET /jobs/{id}/logs as a Server-Sent Events stream.

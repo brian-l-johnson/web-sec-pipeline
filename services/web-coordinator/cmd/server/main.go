@@ -105,7 +105,7 @@ func main() {
 		}
 	}()
 
-	h := api.NewHandler(s, orch, orch, orch, manager)
+	h := api.NewHandler(s, orch, orch, orch, manager, dataDir)
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 	mux.Handle("GET /swagger/", httpSwagger.WrapHandler)

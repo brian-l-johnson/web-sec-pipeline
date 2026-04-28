@@ -168,6 +168,53 @@ const docTemplate = `{
                 }
             }
         },
+        "/jobs/{id}/artifacts/{tool}": {
+            "get": {
+                "tags": [
+                    "jobs"
+                ],
+                "summary": "Download raw scanner output",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Job UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Tool (zap, nuclei, crawl)",
+                        "name": "tool",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/jobs/{id}/findings": {
             "get": {
                 "produces": [

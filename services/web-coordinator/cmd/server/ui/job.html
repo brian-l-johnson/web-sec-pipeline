@@ -111,6 +111,16 @@
   .tool-name-zap    { color: var(--yellow); }
   .tool-name-nuclei { color: var(--purple); }
 
+  .tool-dl {
+    color: var(--muted);
+    text-decoration: none;
+    font-size: 13px;
+    line-height: 1;
+    padding: 0 2px;
+    margin-left: 2px;
+  }
+  .tool-dl:hover { color: var(--accent); }
+
   .job-error {
     margin-top: 12px;
     padding: 10px 14px;
@@ -975,10 +985,14 @@ function badge(status) {
 
 function toolCard(name, status) {
   const statusCls = `tsb-${status}`;
-  const spinner = status === 'running' ? ' <span class="spinner"></span>' : '';
+  const spinner   = status === 'running' ? ' <span class="spinner"></span>' : '';
+  const canDl     = status !== 'pending' && status !== 'running';
+  const dlLink    = canDl
+    ? `<a class="tool-dl" href="/jobs/${jobId}/artifacts/${name}" download title="Download raw output">↓</a>`
+    : '';
   return `<div class="tool-card">
     <span class="tool-name tool-name-${name}">${name}</span>
-    <span class="tool-status-badge ${statusCls}">${status}${spinner}</span>
+    <span class="tool-status-badge ${statusCls}">${status}${spinner}</span>${dlLink}
   </div>`;
 }
 
