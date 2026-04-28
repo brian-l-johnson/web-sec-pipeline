@@ -13,10 +13,6 @@
     --mono:'JetBrains Mono','Fira Code','Courier New',monospace;
   }
   body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; font-size:14px; line-height:1.5; min-height:100vh; }
-  header { background:var(--surface); border-bottom:1px solid var(--border); padding:14px 24px; display:flex; align-items:center; gap:10px; }
-  header h1 { font-size:16px; font-weight:600; }
-  header .dot { width:8px; height:8px; border-radius:50%; background:var(--green); box-shadow:0 0 6px var(--green); }
-  header .sub { color:var(--muted); font-size:12px; margin-left:auto; }
   main { max-width:1100px; margin:0 auto; padding:24px; }
   a.back-link { display:inline-flex; align-items:center; gap:6px; color:var(--muted); text-decoration:none; font-size:13px; margin-bottom:18px; }
   a.back-link:hover { color:var(--text); }
@@ -66,11 +62,7 @@
 </style>
 </head>
 <body>
-<header>
-  <div class="dot"></div>
-  <h1>Web Security Scanner</h1>
-  <span class="sub">Targets &amp; Schedules</span>
-</header>
+<script src="nav.js"></script>
 <main>
   <a class="back-link" href="/ui/">All Jobs</a>
 

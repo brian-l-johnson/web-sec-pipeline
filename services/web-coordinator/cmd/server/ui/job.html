@@ -31,17 +31,6 @@
     min-height: 100vh;
   }
 
-  header {
-    background: var(--surface);
-    border-bottom: 1px solid var(--border);
-    padding: 14px 24px;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-  header h1 { font-size: 16px; font-weight: 600; letter-spacing: .3px; }
-  header .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 6px var(--green); }
-  header .sub { color: var(--muted); font-size: 12px; margin-left: auto; }
 
   main { max-width: 1400px; margin: 0 auto; padding: 24px; }
 
@@ -459,12 +448,7 @@
 </style>
 </head>
 <body>
-
-<header>
-  <div class="dot"></div>
-  <h1>Web Security Scanner</h1>
-  <span class="sub" id="last-refresh"></span>
-</header>
+<script src="nav.js"></script>
 
 <main>
   <a class="back-link" href="/ui/">All Jobs</a>
