@@ -11,9 +11,13 @@
   }
   #site-nav .dot {
     width: 8px; height: 8px; border-radius: 50%;
-    background: var(--green); box-shadow: 0 0 6px var(--green);
     flex-shrink: 0; margin-right: 12px;
+    transition: background .4s, box-shadow .4s;
+    /* amber until first health check completes */
+    background: var(--yellow); box-shadow: 0 0 6px var(--yellow);
   }
+  #site-nav .dot.ok    { background: var(--green);  box-shadow: 0 0 6px var(--green); }
+  #site-nav .dot.error { background: var(--red);    box-shadow: 0 0 6px var(--red); }
   #site-nav .brand {
     color: var(--text); text-decoration: none;
     font-size: 15px; font-weight: 600; letter-spacing: .3px;
@@ -39,7 +43,7 @@
 
 {{define "nav"}}
 <header id="site-nav">
-  <div class="dot"></div>
+  <div class="dot" id="health-dot" title="System health"></div>
   <a class="brand" href="/ui/">Web Security Scanner</a>
   <div class="nav-links">
     <a href="/ui/"{{if eq .ActivePage "jobs"}} class="active"{{end}}>Jobs</a>
@@ -47,4 +51,30 @@
   </div>
   <div class="nav-right"><span id="last-refresh"></span></div>
 </header>
+<script>
+(function () {
+  const dot = document.getElementById('health-dot');
+  const INTERVAL = 30_000;
+
+  async function check() {
+    try {
+      const r = await fetch('/health', { cache: 'no-store' });
+      const data = await r.json().catch(() => ({}));
+      if (r.ok) {
+        dot.className = 'dot ok';
+        dot.title = 'Healthy';
+      } else {
+        dot.className = 'dot error';
+        dot.title = 'Unhealthy: ' + (data.error || r.status);
+      }
+    } catch {
+      dot.className = 'dot error';
+      dot.title = 'Unreachable';
+    }
+  }
+
+  check();
+  setInterval(check, INTERVAL);
+})();
+</script>
 {{end}}
