@@ -87,7 +87,7 @@ func (c *Consumer) Run(ctx context.Context) error {
 		MaxDeliver:    maxDeliver,
 		AckPolicy:     jetstream.AckExplicitPolicy,
 		DeliverPolicy: jetstream.DeliverAllPolicy,
-		AckWait:       10 * time.Minute, // crawl + scan can take a while
+		AckWait:       30 * time.Second, // ack happens after DB write + k8s Job creation (seconds, not minutes)
 	})
 	if err != nil {
 		return fmt.Errorf("create submitted consumer: %w", err)
@@ -194,6 +194,11 @@ func (c *Consumer) handleFailed(ctx context.Context, msg jetstream.Msg) {
 		return
 	}
 	_ = msg.Ack()
+}
+
+// Healthy returns true if the underlying NATS connection is live.
+func (c *Consumer) Healthy() bool {
+	return c.nc != nil && c.nc.IsConnected()
 }
 
 // Close shuts down the NATS connection.

@@ -240,7 +240,16 @@ def main() -> int:
 
     target_url = os.environ.get("TARGET_URL", "").strip()
     scope_raw = os.environ.get("SCOPE", "[]").strip()
-    auth_raw = os.environ.get("AUTH_CONFIG", "").strip()
+    auth_config_path = os.environ.get("AUTH_CONFIG_PATH", "").strip()
+    if auth_config_path:
+        try:
+            with open(auth_config_path) as _f:
+                auth_raw = _f.read().strip()
+        except OSError as _e:
+            log.warning(f"Could not read AUTH_CONFIG_PATH {auth_config_path!r}: {_e}")
+            auth_raw = ""
+    else:
+        auth_raw = os.environ.get("AUTH_CONFIG", "").strip()
     output_dir = os.environ.get("OUTPUT_DIR", "/tmp/output").strip()
     proxy_port = int(os.environ.get("PROXY_PORT", "8080"))
     max_urls = int(os.environ.get("MAX_URLS", "50"))

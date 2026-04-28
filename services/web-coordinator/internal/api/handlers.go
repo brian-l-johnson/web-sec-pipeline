@@ -51,12 +51,19 @@ type JobLogStreamer interface {
 
 // Handler holds shared dependencies for the HTTP handlers.
 type Handler struct {
-	store       Storer
-	retriggerer JobRetriggerer
-	submitter   JobSubmitter
-	reparserer  FindingsReparserer
-	logStreamer  JobLogStreamer
-	dataDir     string
+	store        Storer
+	retriggerer  JobRetriggerer
+	submitter    JobSubmitter
+	reparserer   FindingsReparserer
+	logStreamer   JobLogStreamer
+	dataDir      string
+	healthChecks []func(ctx context.Context) error
+}
+
+// AddHealthCheck registers a function that is called by HealthHandler. If any
+// check returns an error the endpoint responds 503.
+func (h *Handler) AddHealthCheck(fn func(ctx context.Context) error) {
+	h.healthChecks = append(h.healthChecks, fn)
 }
 
 // NewHandler creates a Handler.
@@ -282,8 +289,15 @@ func (h *Handler) SubmitJobHandler(w http.ResponseWriter, r *http.Request) {
 // @Tags         system
 // @Produce      json
 // @Success      200  {object}  map[string]string
+// @Failure      503  {object}  map[string]string
 // @Router       /health [get]
 func (h *Handler) HealthHandler(w http.ResponseWriter, r *http.Request) {
+	for _, check := range h.healthChecks {
+		if err := check(r.Context()); err != nil {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "unhealthy", "error": err.Error()})
+			return
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 

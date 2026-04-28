@@ -15,6 +15,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
+	k8stypes "k8s.io/apimachinery/pkg/types"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/informers"
@@ -28,8 +29,6 @@ const (
 	labelJobID   = "web-sec-tools/job-id"
 	labelTool    = "web-sec-tools/tool"
 	jobTypeValue = "scan"
-	namespace    = "web-sec-tools"
-	pvcName      = "web-sec-tools-data"
 )
 
 // JobEventHandler is called when a Kubernetes Job changes state.
@@ -44,6 +43,8 @@ type Manager struct {
 	crawlerImage string
 	zapImage     string
 	nucleiImage  string
+	namespace    string
+	pvcName      string
 	// handled guards against duplicate event dispatch: the informer fires
 	// UpdateFunc on every k8s Job update (TTL controller, metadata patches, etc.)
 	// even after a Job has reached a terminal state. LoadOrStore ensures each
@@ -52,7 +53,14 @@ type Manager struct {
 }
 
 // NewManager creates a Manager using in-cluster config and the given image refs.
-func NewManager(crawlerImage, zapImage, nucleiImage string) (*Manager, error) {
+// namespace and pvcName default to "web-sec-tools" and "web-sec-tools-data" if empty.
+func NewManager(crawlerImage, zapImage, nucleiImage, namespace, pvcName string) (*Manager, error) {
+	if namespace == "" {
+		namespace = "web-sec-tools"
+	}
+	if pvcName == "" {
+		pvcName = "web-sec-tools-data"
+	}
 	cfg, err := rest.InClusterConfig()
 	if err != nil {
 		return nil, fmt.Errorf("in-cluster config: %w", err)
@@ -66,29 +74,37 @@ func NewManager(crawlerImage, zapImage, nucleiImage string) (*Manager, error) {
 		crawlerImage: crawlerImage,
 		zapImage:     zapImage,
 		nucleiImage:  nucleiImage,
+		namespace:    namespace,
+		pvcName:      pvcName,
 	}, nil
 }
 
 // CreateCrawlJob launches the Playwright+mitmproxy crawler Job for a given scan job.
 // The crawler writes its HAR output to /data/output/<jobID>/crawl/capture.har.
-//
-// NOTE: auth_config is passed as an env var containing a JSON string. For a
-// production deployment, store credentials in a k8s Secret instead.
+// If auth_config is provided it is stored in a k8s Secret mounted into the pod
+// rather than passed as a plain environment variable.
 func (m *Manager) CreateCrawlJob(ctx context.Context, jobID uuid.UUID, targetURL string, scope []string, authConfig json.RawMessage) error {
 	outputDir := fmt.Sprintf("/data/output/%s/crawl", jobID)
-
 	scopeJSON, _ := json.Marshal(scope)
-
-	var authConfigStr string
-	if len(authConfig) > 0 {
-		authConfigStr = string(authConfig)
-	}
 
 	env := []corev1.EnvVar{
 		{Name: "TARGET_URL", Value: targetURL},
 		{Name: "SCOPE", Value: string(scopeJSON)},
-		{Name: "AUTH_CONFIG", Value: authConfigStr},
 		{Name: "OUTPUT_DIR", Value: outputDir},
+	}
+
+	// Store credentials in a k8s Secret so they are not visible in pod env.
+	var authSecretName string
+	if len(authConfig) > 0 && string(authConfig) != "null" {
+		var err error
+		authSecretName, err = m.createAuthSecret(ctx, jobID, authConfig)
+		if err != nil {
+			return fmt.Errorf("create auth secret: %w", err)
+		}
+		env = append(env, corev1.EnvVar{
+			Name:  "AUTH_CONFIG_PATH",
+			Value: "/run/secrets/auth-config/auth_config.json",
+		})
 	}
 
 	job := m.buildJob(jobID, "crawl", m.crawlerImage, env,
@@ -104,10 +120,89 @@ func (m *Manager) CreateCrawlJob(ctx context.Context, jobID uuid.UUID, targetURL
 		1800,
 	)
 
-	if _, err := m.clientset.BatchV1().Jobs(namespace).Create(ctx, job, metav1.CreateOptions{}); err != nil {
+	if authSecretName != "" {
+		optional := false
+		job.Spec.Template.Spec.Volumes = append(job.Spec.Template.Spec.Volumes, corev1.Volume{
+			Name: "auth-secret",
+			VolumeSource: corev1.VolumeSource{
+				Secret: &corev1.SecretVolumeSource{
+					SecretName: authSecretName,
+					Optional:   &optional,
+				},
+			},
+		})
+		job.Spec.Template.Spec.Containers[0].VolumeMounts = append(
+			job.Spec.Template.Spec.Containers[0].VolumeMounts,
+			corev1.VolumeMount{Name: "auth-secret", MountPath: "/run/secrets/auth-config", ReadOnly: true},
+		)
+	}
+
+	created, err := m.clientset.BatchV1().Jobs(m.namespace).Create(ctx, job, metav1.CreateOptions{})
+	if err != nil {
 		return fmt.Errorf("create crawl job: %w", err)
 	}
+
+	if authSecretName != "" {
+		if err := m.setSecretOwner(ctx, authSecretName, created); err != nil {
+			// Non-fatal: secret won't auto-GC but the scan is unaffected.
+			log.Printf("jobs: set ownerRef on auth secret failed (job=%s): %v", jobID, err)
+		}
+	}
 	return nil
+}
+
+// createAuthSecret creates a k8s Secret containing the auth config JSON.
+func (m *Manager) createAuthSecret(ctx context.Context, jobID uuid.UUID, authConfig json.RawMessage) (string, error) {
+	name := fmt.Sprintf("web-crawl-auth-%s", jobID)
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: m.namespace,
+			Labels: map[string]string{
+				labelJobType: jobTypeValue,
+				labelJobID:   jobID.String(),
+			},
+		},
+		Data: map[string][]byte{
+			"auth_config.json": []byte(authConfig),
+		},
+	}
+	if _, err := m.clientset.CoreV1().Secrets(m.namespace).Create(ctx, secret, metav1.CreateOptions{}); err != nil {
+		return "", fmt.Errorf("create secret: %w", err)
+	}
+	return name, nil
+}
+
+// setSecretOwner patches the Secret with an ownerReference pointing to the Job
+// so Kubernetes garbage-collects the Secret when the Job TTLs out.
+func (m *Manager) setSecretOwner(ctx context.Context, secretName string, job *batchv1.Job) error {
+	isController := true
+	blockDeletion := true
+	patch, err := json.Marshal(map[string]any{
+		"metadata": map[string]any{
+			"ownerReferences": []map[string]any{{
+				"apiVersion":         "batch/v1",
+				"kind":               "Job",
+				"name":               job.Name,
+				"uid":                string(job.UID),
+				"controller":         &isController,
+				"blockOwnerDeletion": &blockDeletion,
+			}},
+		},
+	})
+	if err != nil {
+		return err
+	}
+	_, err = m.clientset.CoreV1().Secrets(m.namespace).Patch(
+		ctx, secretName, k8stypes.MergePatchType, patch, metav1.PatchOptions{},
+	)
+	return err
+}
+
+// Healthy returns true if the underlying Kubernetes API is reachable.
+func (m *Manager) Healthy() bool {
+	_, err := m.clientset.Discovery().ServerVersion()
+	return err == nil
 }
 
 // CreateZAPJob launches a ZAP active/passive scan Job.
@@ -133,7 +228,7 @@ func (m *Manager) CreateZAPJob(ctx context.Context, jobID uuid.UUID, targetURL, 
 		3600,
 	)
 
-	if _, err := m.clientset.BatchV1().Jobs(namespace).Create(ctx, job, metav1.CreateOptions{}); err != nil {
+	if _, err := m.clientset.BatchV1().Jobs(m.namespace).Create(ctx, job, metav1.CreateOptions{}); err != nil {
 		return fmt.Errorf("create zap job: %w", err)
 	}
 	return nil
@@ -161,7 +256,7 @@ func (m *Manager) CreateNucleiJob(ctx context.Context, jobID uuid.UUID, targetUR
 		3600,
 	)
 
-	if _, err := m.clientset.BatchV1().Jobs(namespace).Create(ctx, job, metav1.CreateOptions{}); err != nil {
+	if _, err := m.clientset.BatchV1().Jobs(m.namespace).Create(ctx, job, metav1.CreateOptions{}); err != nil {
 		return fmt.Errorf("create nuclei job: %w", err)
 	}
 	return nil
@@ -176,7 +271,7 @@ func (m *Manager) buildJob(jobID uuid.UUID, tool, image string, env []corev1.Env
 	return &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      fmt.Sprintf("web-%s-%s", tool, jobID),
-			Namespace: namespace,
+			Namespace: m.namespace,
 			Labels: map[string]string{
 				labelJobType: jobTypeValue,
 				labelJobID:   jobID.String(),
@@ -209,7 +304,7 @@ func (m *Manager) buildJob(jobID uuid.UUID, tool, image string, env []corev1.Env
 							Name: "data",
 							VolumeSource: corev1.VolumeSource{
 								PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-									ClaimName: pvcName,
+									ClaimName: m.pvcName,
 								},
 							},
 						},
@@ -243,7 +338,7 @@ func (m *Manager) WatchJobs(ctx context.Context, handler JobEventHandler) {
 	factory := informers.NewSharedInformerFactoryWithOptions(
 		m.clientset,
 		30*time.Second,
-		informers.WithNamespace(namespace),
+		informers.WithNamespace(m.namespace),
 		informers.WithTweakListOptions(func(opts *metav1.ListOptions) {
 			opts.LabelSelector = labelSelector.String()
 		}),
@@ -304,7 +399,7 @@ func (m *Manager) handleJobUpdate(ctx context.Context, job *batchv1.Job, handler
 
 func (m *Manager) fetchPodLogs(ctx context.Context, job *batchv1.Job) string {
 	selector := labels.SelectorFromSet(job.Spec.Selector.MatchLabels)
-	pods, err := m.clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
+	pods, err := m.clientset.CoreV1().Pods(m.namespace).List(ctx, metav1.ListOptions{
 		LabelSelector: selector.String(),
 	})
 	if err != nil {
@@ -320,7 +415,7 @@ func (m *Manager) fetchPodLogs(ctx context.Context, job *batchv1.Job) string {
 		containerName = pod.Spec.Containers[0].Name
 	}
 
-	req := m.clientset.CoreV1().Pods(namespace).GetLogs(pod.Name, &corev1.PodLogOptions{
+	req := m.clientset.CoreV1().Pods(m.namespace).GetLogs(pod.Name, &corev1.PodLogOptions{
 		Container: containerName,
 	})
 	rc, err := req.Stream(ctx)
@@ -344,7 +439,7 @@ func (m *Manager) ReconcileRunningJobs(ctx context.Context, runningJobs []uuid.U
 	for _, jobID := range runningJobs {
 		for _, tool := range []string{"crawl", "zap", "nuclei"} {
 			k8sJobName := fmt.Sprintf("web-%s-%s", tool, jobID)
-			k8sJob, err := m.clientset.BatchV1().Jobs(namespace).Get(ctx, k8sJobName, metav1.GetOptions{})
+			k8sJob, err := m.clientset.BatchV1().Jobs(m.namespace).Get(ctx, k8sJobName, metav1.GetOptions{})
 			if err != nil {
 				// Job not found — likely TTL-expired after it already completed/failed.
 				// Skip rather than spuriously marking it failed again.
@@ -411,7 +506,7 @@ func (m *Manager) streamToolLogs(ctx context.Context, jobID uuid.UUID, tool stri
 	// Wait for the k8s Job to be created.
 	var k8sJob *batchv1.Job
 	for {
-		j, err := m.clientset.BatchV1().Jobs(namespace).Get(ctx, jobName, metav1.GetOptions{})
+		j, err := m.clientset.BatchV1().Jobs(m.namespace).Get(ctx, jobName, metav1.GetOptions{})
 		if err == nil {
 			k8sJob = j
 			break
@@ -435,7 +530,7 @@ func (m *Manager) streamToolLogs(ctx context.Context, jobID uuid.UUID, tool stri
 	podDeadline := time.Now().Add(2 * time.Minute)
 	var podName, containerName string
 	for {
-		pods, err := m.clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
+		pods, err := m.clientset.CoreV1().Pods(m.namespace).List(ctx, metav1.ListOptions{
 			LabelSelector: selector.String(),
 		})
 		if err == nil && len(pods.Items) > 0 {
@@ -458,7 +553,7 @@ func (m *Manager) streamToolLogs(ctx context.Context, jobID uuid.UUID, tool stri
 	}
 
 	// Stream the pod logs, following until the container exits.
-	req := m.clientset.CoreV1().Pods(namespace).GetLogs(podName, &corev1.PodLogOptions{
+	req := m.clientset.CoreV1().Pods(m.namespace).GetLogs(podName, &corev1.PodLogOptions{
 		Container: containerName,
 		Follow:    true,
 	})

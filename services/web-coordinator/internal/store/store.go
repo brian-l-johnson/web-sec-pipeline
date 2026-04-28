@@ -27,6 +27,11 @@ func New(databaseURL string) (*Store, error) {
 	return &Store{pool: pool}, nil
 }
 
+// Ping checks that the database is reachable.
+func (s *Store) Ping(ctx context.Context) error {
+	return s.pool.Ping(ctx)
+}
+
 // Close releases all connections in the pool.
 func (s *Store) Close() {
 	s.pool.Close()

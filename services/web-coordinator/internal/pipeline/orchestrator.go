@@ -45,6 +45,13 @@ func (o *Orchestrator) HandleSubmitted(ctx context.Context, msg *queue.Submitted
 		return fmt.Errorf("invalid job_id %q: %w", msg.JobID, err)
 	}
 
+	// Idempotency: if the job already exists (NATS redelivery after a crash
+	// before ack), treat as success so the message is acked and not retried.
+	if _, err := o.store.GetJob(ctx, jobID); err == nil {
+		log.Printf("orchestrator: job %s already exists — skipping duplicate submission", jobID)
+		return nil
+	}
+
 	submittedAt, err := time.Parse(time.RFC3339, msg.SubmittedAt)
 	if err != nil {
 		submittedAt = time.Now()
@@ -252,6 +259,33 @@ func (o *Orchestrator) launchScanners(ctx context.Context, jobID uuid.UUID) {
 	}
 }
 
+// SweepStaleJobs marks any job that has been stuck in 'running' longer than
+// maxJobAge as failed. This handles the case where the coordinator was restarted
+// after all k8s Jobs had already TTL-expired, leaving the DB row stranded.
+func (o *Orchestrator) SweepStaleJobs(ctx context.Context) {
+	const maxJobAge = 4 * time.Hour
+
+	jobs, err := o.store.ListRunningJobs(ctx)
+	if err != nil {
+		log.Printf("orchestrator: sweep stale jobs: %v", err)
+		return
+	}
+	now := time.Now()
+	for _, job := range jobs {
+		if job.StartedAt == nil {
+			continue
+		}
+		if now.Sub(*job.StartedAt) > maxJobAge {
+			msg := fmt.Sprintf("job timed out after %s with no completion recorded", now.Sub(*job.StartedAt).Round(time.Minute))
+			if err := o.store.SetJobError(ctx, job.ID, msg); err != nil {
+				log.Printf("orchestrator: sweep: set error (job=%s): %v", job.ID, err)
+			} else {
+				log.Printf("orchestrator: sweep: marked stale job %s as failed", job.ID)
+			}
+		}
+	}
+}
+
 // ReparseFindings deletes existing findings for the job and re-reads the ZAP
 // and Nuclei report files from disk. Missing files are skipped silently.
 // Returns the counts of ZAP and Nuclei findings stored.
@@ -303,10 +337,18 @@ func (o *Orchestrator) checkAndCompleteJob(ctx context.Context, jobID uuid.UUID)
 	nucleiDone := job.NucleiStatus == "complete" || job.NucleiStatus == "failed"
 
 	if zapDone && nucleiDone {
-		if err := o.store.SetJobCompleted(ctx, jobID); err != nil {
-			log.Printf("orchestrator: set job completed failed (job=%s): %v", jobID, err)
+		if job.ZAPStatus == "failed" && job.NucleiStatus == "failed" {
+			if err := o.store.SetJobError(ctx, jobID, "all scanners failed"); err != nil {
+				log.Printf("orchestrator: set job error (all scanners failed) (job=%s): %v", jobID, err)
+			} else {
+				log.Printf("orchestrator: job %s failed — both ZAP and Nuclei errored", jobID)
+			}
 		} else {
-			log.Printf("orchestrator: job %s complete (zap=%s nuclei=%s)", jobID, job.ZAPStatus, job.NucleiStatus)
+			if err := o.store.SetJobCompleted(ctx, jobID); err != nil {
+				log.Printf("orchestrator: set job completed failed (job=%s): %v", jobID, err)
+			} else {
+				log.Printf("orchestrator: job %s complete (zap=%s nuclei=%s)", jobID, job.ZAPStatus, job.NucleiStatus)
+			}
 		}
 	}
 }

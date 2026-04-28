@@ -46,6 +46,8 @@ func main() {
 	servicePort   := getEnv("SERVICE_PORT", "8080")
 	dataDir       := getEnv("DATA_DIR", "/data")
 	migrationsDir := getEnv("GOOSE_MIGRATION_DIR", "/migrations")
+	k8sNamespace  := getEnv("NAMESPACE", "web-sec-tools")
+	k8sPVCName    := getEnv("PVC_NAME", "web-sec-tools-data")
 
 	// Run Goose migrations before connecting anything else.
 	log.Println("running database migrations...")
@@ -60,7 +62,7 @@ func main() {
 	}
 	defer s.Close()
 
-	manager, err := jobs.NewManager(crawlerImage, zapImage, nucleiImage)
+	manager, err := jobs.NewManager(crawlerImage, zapImage, nucleiImage, k8sNamespace, k8sPVCName)
 	if err != nil {
 		log.Fatalf("create k8s job manager: %v", err)
 	}
@@ -84,6 +86,13 @@ func main() {
 	}
 	log.Println("reconciliation complete")
 
+	// Mark jobs that have been stuck in 'running' for more than 4 hours as
+	// failed. This handles the case where all k8s Jobs TTL-expired before the
+	// coordinator restarted and reconcile had nothing to process.
+	log.Println("sweeping stale jobs...")
+	orch.SweepStaleJobs(bgCtx)
+	log.Println("stale job sweep complete")
+
 	workerCtx, workerCancel := context.WithCancel(context.Background())
 	defer workerCancel()
 
@@ -106,6 +115,13 @@ func main() {
 	}()
 
 	h := api.NewHandler(s, orch, orch, orch, manager, dataDir)
+	h.AddHealthCheck(s.Ping)
+	h.AddHealthCheck(func(ctx context.Context) error {
+		if !consumer.Healthy() {
+			return fmt.Errorf("NATS disconnected")
+		}
+		return nil
+	})
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 	mux.Handle("GET /swagger/", httpSwagger.WrapHandler)

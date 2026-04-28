@@ -64,7 +64,7 @@ func (o *Orchestrator) parseAndStoreZAPFindings(ctx context.Context, jobID uuid.
 		return 0, fmt.Errorf("parse zap report json: %w", err)
 	}
 
-	count := 0
+	count, errs := 0, 0
 	for _, site := range report.Site {
 		for _, alert := range site.Alerts {
 			severity := zapRiskToSeverity(alert.RiskDesc)
@@ -91,13 +91,17 @@ func (o *Orchestrator) parseAndStoreZAPFindings(ctx context.Context, jobID uuid.
 
 				if err := o.store.InsertFinding(ctx, f); err != nil {
 					log.Printf("orchestrator: insert zap finding failed (job=%s url=%s): %v", jobID, inst.URI, err)
+					errs++
 				} else {
 					count++
 				}
 			}
 		}
 	}
-	log.Printf("orchestrator: stored %d ZAP findings for job %s", count, jobID)
+	log.Printf("orchestrator: stored %d ZAP findings for job %s (%d insert errors)", count, jobID, errs)
+	if errs > 0 {
+		return count, fmt.Errorf("%d of %d ZAP findings failed to insert", errs, count+errs)
+	}
 	return count, nil
 }
 
@@ -159,7 +163,7 @@ func (o *Orchestrator) parseAndStoreNucleiFindings(ctx context.Context, jobID uu
 		return 0, fmt.Errorf("parse nuclei report json: %w", err)
 	}
 
-	count := 0
+	count, errs := 0, 0
 	for _, result := range results {
 		finding := store.WebFinding{
 			ID:         uuid.New(),
@@ -177,10 +181,14 @@ func (o *Orchestrator) parseAndStoreNucleiFindings(ctx context.Context, jobID uu
 
 		if err := o.store.InsertFinding(ctx, finding); err != nil {
 			log.Printf("orchestrator: insert nuclei finding failed (job=%s url=%s): %v", jobID, result.MatchedAt, err)
+			errs++
 		} else {
 			count++
 		}
 	}
-	log.Printf("orchestrator: stored %d Nuclei findings for job %s", count, jobID)
+	log.Printf("orchestrator: stored %d Nuclei findings for job %s (%d insert errors)", count, jobID, errs)
+	if errs > 0 {
+		return count, fmt.Errorf("%d of %d Nuclei findings failed to insert", errs, count+errs)
+	}
 	return count, nil
 }
