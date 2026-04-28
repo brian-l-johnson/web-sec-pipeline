@@ -106,6 +106,16 @@ func (o *Orchestrator) HandleIngestionFailed(ctx context.Context, msg *queue.Fai
 func (o *Orchestrator) OnJobComplete(jobID uuid.UUID, tool string) {
 	ctx := context.Background()
 
+	// Guard against informer re-fires after coordinator restarts. The in-memory
+	// handled map is empty on restart, so UpdateFunc fires again for any k8s Job
+	// still within its TTL. Check DB state and skip if already processed.
+	if existing, err := o.store.GetJob(ctx, jobID); err == nil {
+		if s := jobToolStatus(existing, tool); s != "running" && s != "pending" {
+			log.Printf("orchestrator: ignoring duplicate OnJobComplete (job=%s tool=%s db_status=%s)", jobID, tool, s)
+			return
+		}
+	}
+
 	if err := o.store.UpdateJobToolStatus(ctx, jobID, tool, "complete"); err != nil {
 		log.Printf("orchestrator: update tool status failed (job=%s tool=%s): %v", jobID, tool, err)
 		return
@@ -139,6 +149,14 @@ func (o *Orchestrator) OnJobComplete(jobID uuid.UUID, tool string) {
 // OnJobFailed is called when a k8s Job fails.
 func (o *Orchestrator) OnJobFailed(jobID uuid.UUID, tool string, logs string) {
 	ctx := context.Background()
+
+	// Same restart-dedup guard as OnJobComplete.
+	if existing, err := o.store.GetJob(ctx, jobID); err == nil {
+		if s := jobToolStatus(existing, tool); s != "running" && s != "pending" {
+			log.Printf("orchestrator: ignoring duplicate OnJobFailed (job=%s tool=%s db_status=%s)", jobID, tool, s)
+			return
+		}
+	}
 
 	if err := o.store.UpdateJobToolStatus(ctx, jobID, tool, "failed"); err != nil {
 		log.Printf("orchestrator: update tool status failed (job=%s tool=%s): %v", jobID, tool, err)
@@ -207,27 +225,31 @@ func (o *Orchestrator) launchScanners(ctx context.Context, jobID uuid.UUID) {
 		return
 	}
 
-	go func() {
-		if err := o.store.UpdateJobToolStatus(ctx, jobID, "zap", "running"); err != nil {
-			log.Printf("orchestrator: set zap running (job=%s): %v", jobID, err)
-		}
-		if err := o.manager.CreateZAPJob(ctx, jobID, job.TargetURL, job.ScanProfile); err != nil {
-			log.Printf("orchestrator: create zap job failed (job=%s): %v", jobID, err)
-			_ = o.store.UpdateJobToolStatus(ctx, jobID, "zap", "failed")
-			o.checkAndCompleteJob(ctx, jobID)
-		}
-	}()
+	if job.ZAPStatus == "pending" {
+		go func() {
+			if err := o.store.UpdateJobToolStatus(ctx, jobID, "zap", "running"); err != nil {
+				log.Printf("orchestrator: set zap running (job=%s): %v", jobID, err)
+			}
+			if err := o.manager.CreateZAPJob(ctx, jobID, job.TargetURL, job.ScanProfile); err != nil {
+				log.Printf("orchestrator: create zap job failed (job=%s): %v", jobID, err)
+				_ = o.store.UpdateJobToolStatus(ctx, jobID, "zap", "failed")
+				o.checkAndCompleteJob(ctx, jobID)
+			}
+		}()
+	}
 
-	go func() {
-		if err := o.store.UpdateJobToolStatus(ctx, jobID, "nuclei", "running"); err != nil {
-			log.Printf("orchestrator: set nuclei running (job=%s): %v", jobID, err)
-		}
-		if err := o.manager.CreateNucleiJob(ctx, jobID, job.TargetURL); err != nil {
-			log.Printf("orchestrator: create nuclei job failed (job=%s): %v", jobID, err)
-			_ = o.store.UpdateJobToolStatus(ctx, jobID, "nuclei", "failed")
-			o.checkAndCompleteJob(ctx, jobID)
-		}
-	}()
+	if job.NucleiStatus == "pending" {
+		go func() {
+			if err := o.store.UpdateJobToolStatus(ctx, jobID, "nuclei", "running"); err != nil {
+				log.Printf("orchestrator: set nuclei running (job=%s): %v", jobID, err)
+			}
+			if err := o.manager.CreateNucleiJob(ctx, jobID, job.TargetURL); err != nil {
+				log.Printf("orchestrator: create nuclei job failed (job=%s): %v", jobID, err)
+				_ = o.store.UpdateJobToolStatus(ctx, jobID, "nuclei", "failed")
+				o.checkAndCompleteJob(ctx, jobID)
+			}
+		}()
+	}
 }
 
 // ReparseFindings deletes existing findings for the job and re-reads the ZAP
@@ -252,6 +274,20 @@ func (o *Orchestrator) ReparseFindings(ctx context.Context, jobID uuid.UUID) (in
 
 	log.Printf("orchestrator: reparsed findings for job %s (zap=%d nuclei=%d)", jobID, zapCount, nucleiCount)
 	return zapCount, nucleiCount, nil
+}
+
+// jobToolStatus returns the DB status for a given tool on a job.
+func jobToolStatus(job *store.WebJob, tool string) string {
+	switch tool {
+	case "crawl":
+		return job.CrawlStatus
+	case "zap":
+		return job.ZAPStatus
+	case "nuclei":
+		return job.NucleiStatus
+	default:
+		return ""
+	}
 }
 
 // checkAndCompleteJob marks the overall job complete when both ZAP and Nuclei
