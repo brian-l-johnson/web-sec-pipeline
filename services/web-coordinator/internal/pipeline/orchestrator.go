@@ -20,18 +20,43 @@ import (
 	"github.com/brian-l-johnson/web-sec-pipeline/services/web-coordinator/internal/store"
 )
 
+// EventPublisher publishes pipeline-stage events to NATS. Nil-safe — if nil,
+// publish calls are silently skipped.
+type EventPublisher interface {
+	PublishJobStarted(ctx context.Context, msg *queue.JobStartedMessage) error
+	PublishJobCompleted(ctx context.Context, msg *queue.JobCompletedMessage) error
+	PublishJobFailed(ctx context.Context, msg *queue.JobFailedMessage) error
+}
+
 // Orchestrator implements queue.MessageHandler and jobs.JobEventHandler.
 // It ties together the NATS consumer, k8s job manager, and store into the
 // full web scan pipeline.
 type Orchestrator struct {
-	store   *store.Store
-	manager *jobs.Manager
-	dataDir string
+	store     *store.Store
+	manager   *jobs.Manager
+	dataDir   string
+	publisher EventPublisher
 }
 
 // NewOrchestrator creates an Orchestrator with all its dependencies.
 func NewOrchestrator(s *store.Store, m *jobs.Manager, dataDir string) *Orchestrator {
 	return &Orchestrator{store: s, manager: m, dataDir: dataDir}
+}
+
+// WithPublisher attaches an event publisher and returns the orchestrator for chaining.
+func (o *Orchestrator) WithPublisher(p EventPublisher) *Orchestrator {
+	o.publisher = p
+	return o
+}
+
+// publishEvent calls fn and logs any error without failing the caller.
+func (o *Orchestrator) publishEvent(fn func() error) {
+	if o.publisher == nil {
+		return
+	}
+	if err := fn(); err != nil {
+		log.Printf("orchestrator: publish event error: %v", err)
+	}
 }
 
 // Compile-time interface assertions.
@@ -85,7 +110,14 @@ func (o *Orchestrator) HandleSubmitted(ctx context.Context, msg *queue.Submitted
 	if err := o.store.SetJobStarted(ctx, jobID); err != nil {
 		log.Printf("orchestrator: set job started failed (job=%s): %v", jobID, err)
 	}
-	_ = now
+	o.publishEvent(func() error {
+		return o.publisher.PublishJobStarted(ctx, &queue.JobStartedMessage{
+			JobID:     jobID.String(),
+			TargetURL: msg.TargetURL,
+			Profile:   msg.ScanProfile,
+			StartedAt: now.UTC().Format(time.RFC3339),
+		})
+	})
 
 	if err := o.manager.CreateCrawlJob(ctx, jobID, msg.TargetURL, msg.Scope, msg.AuthConfig); err != nil {
 		_ = o.store.SetJobError(ctx, jobID, fmt.Sprintf("create crawl job: %v", err))
@@ -93,19 +125,6 @@ func (o *Orchestrator) HandleSubmitted(ctx context.Context, msg *queue.Submitted
 	}
 
 	log.Printf("orchestrator: job %s started (target=%s profile=%s)", jobID, msg.TargetURL, msg.ScanProfile)
-	return nil
-}
-
-// HandleIngestionFailed processes a webapp.ingestion.failed NATS message.
-func (o *Orchestrator) HandleIngestionFailed(ctx context.Context, msg *queue.FailedMessage) error {
-	jobID, err := uuid.Parse(msg.JobID)
-	if err != nil {
-		return fmt.Errorf("invalid job_id %q: %w", msg.JobID, err)
-	}
-	if err := o.store.SetJobError(ctx, jobID, msg.Error); err != nil {
-		return fmt.Errorf("set job error: %w", err)
-	}
-	log.Printf("orchestrator: job %s ingestion failed: %s", jobID, msg.Error)
 	return nil
 }
 
@@ -180,6 +199,16 @@ func (o *Orchestrator) OnJobFailed(jobID uuid.UUID, tool string, logs string) {
 			log.Printf("orchestrator: set job error failed (job=%s): %v", jobID, err)
 		}
 		log.Printf("orchestrator: crawl failed for job %s: %s", jobID, logs)
+		if job, err := o.store.GetJob(ctx, jobID); err == nil {
+			o.publishEvent(func() error {
+				return o.publisher.PublishJobFailed(ctx, &queue.JobFailedMessage{
+					JobID:     jobID.String(),
+					TargetURL: job.TargetURL,
+					FailedAt:  time.Now().UTC().Format(time.RFC3339),
+					Reason:    errMsg,
+				})
+			})
+		}
 		return
 	}
 
@@ -480,17 +509,35 @@ func (o *Orchestrator) checkAndCompleteJob(ctx context.Context, jobID uuid.UUID)
 	nucleiDone := job.NucleiStatus == "complete" || job.NucleiStatus == "failed"
 
 	if zapDone && nucleiDone {
+		now := time.Now().UTC().Format(time.RFC3339)
 		if job.ZAPStatus == "failed" && job.NucleiStatus == "failed" {
 			if err := o.store.SetJobError(ctx, jobID, "all scanners failed"); err != nil {
 				log.Printf("orchestrator: set job error (all scanners failed) (job=%s): %v", jobID, err)
 			} else {
 				log.Printf("orchestrator: job %s failed — both ZAP and Nuclei errored", jobID)
+				o.publishEvent(func() error {
+					return o.publisher.PublishJobFailed(ctx, &queue.JobFailedMessage{
+						JobID:     jobID.String(),
+						TargetURL: job.TargetURL,
+						FailedAt:  now,
+						Reason:    "all scanners failed",
+					})
+				})
 			}
 		} else {
 			if err := o.store.SetJobCompleted(ctx, jobID); err != nil {
 				log.Printf("orchestrator: set job completed failed (job=%s): %v", jobID, err)
 			} else {
 				log.Printf("orchestrator: job %s complete (zap=%s nuclei=%s)", jobID, job.ZAPStatus, job.NucleiStatus)
+				o.publishEvent(func() error {
+					return o.publisher.PublishJobCompleted(ctx, &queue.JobCompletedMessage{
+						JobID:        jobID.String(),
+						TargetURL:    job.TargetURL,
+						CompletedAt:  now,
+						ZAPStatus:    job.ZAPStatus,
+						NucleiStatus: job.NucleiStatus,
+					})
+				})
 			}
 		}
 	}

@@ -15,7 +15,6 @@ import (
 // mockPublisher records published messages and optionally returns an error.
 type mockPublisher struct {
 	submitted []*queue.SubmittedMessage
-	failed    []*queue.FailedMessage
 	err       error
 }
 
@@ -24,14 +23,6 @@ func (m *mockPublisher) PublishSubmitted(_ context.Context, msg *queue.Submitted
 		return m.err
 	}
 	m.submitted = append(m.submitted, msg)
-	return nil
-}
-
-func (m *mockPublisher) PublishFailed(_ context.Context, msg *queue.FailedMessage) error {
-	if m.err != nil {
-		return m.err
-	}
-	m.failed = append(m.failed, msg)
 	return nil
 }
 

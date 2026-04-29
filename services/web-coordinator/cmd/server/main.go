@@ -114,6 +114,13 @@ func main() {
 	}
 	defer consumer.Close()
 
+	publisher, err := queue.NewPublisher(natsURL)
+	if err != nil {
+		log.Fatalf("create nats publisher: %v", err)
+	}
+	defer publisher.Close()
+	orch.WithPublisher(publisher)
+
 	go func() {
 		log.Println("starting nats consumer...")
 		if err := consumer.Run(workerCtx); err != nil && workerCtx.Err() == nil {

@@ -14,7 +14,6 @@ import (
 // Publisher is the subset of queue.Publisher used by the handlers.
 type Publisher interface {
 	PublishSubmitted(ctx context.Context, msg *queue.SubmittedMessage) error
-	PublishFailed(ctx context.Context, msg *queue.FailedMessage) error
 }
 
 // Handler holds shared dependencies for the HTTP handlers.

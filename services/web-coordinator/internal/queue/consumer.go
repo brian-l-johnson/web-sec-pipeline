@@ -13,11 +13,10 @@ import (
 
 const (
 	streamName   = "WEBAPP_EVENTS"
-	consumerName = "web-coordinator"
 	subjectAll   = "webapp.>"
+	consumerName = "web-coordinator"
 
 	SubjectSubmitted = "webapp.submitted"
-	SubjectFailed    = "webapp.ingestion.failed"
 
 	maxDeliver = 5
 )
@@ -32,16 +31,9 @@ type SubmittedMessage struct {
 	SubmittedAt string          `json:"submitted_at"` // RFC3339
 }
 
-// FailedMessage is published by web-ingestion when ingestion fails.
-type FailedMessage struct {
-	JobID string `json:"job_id"`
-	Error string `json:"error"`
-}
-
 // MessageHandler handles web pipeline events.
 type MessageHandler interface {
 	HandleSubmitted(ctx context.Context, msg *SubmittedMessage) error
-	HandleIngestionFailed(ctx context.Context, msg *FailedMessage) error
 }
 
 // Consumer subscribes to WEBAPP_EVENTS JetStream and dispatches messages.
@@ -51,8 +43,7 @@ type Consumer struct {
 	handler MessageHandler
 }
 
-// NewConsumer connects to NATS, ensures the stream and durable consumers exist,
-// and returns a ready Consumer.
+// NewConsumer connects to NATS, ensures the stream exists, and returns a ready Consumer.
 func NewConsumer(natsURL string, handler MessageHandler) (*Consumer, error) {
 	nc, err := nats.Connect(natsURL)
 	if err != nil {
@@ -65,11 +56,10 @@ func NewConsumer(natsURL string, handler MessageHandler) (*Consumer, error) {
 		return nil, fmt.Errorf("create jetstream context: %w", err)
 	}
 
-	ctx := context.Background()
-	_, err = js.CreateOrUpdateStream(ctx, jetstream.StreamConfig{
+	_, err = js.CreateOrUpdateStream(context.Background(), jetstream.StreamConfig{
 		Name:      streamName,
 		Subjects:  []string{subjectAll},
-		Retention: jetstream.WorkQueuePolicy,
+		Retention: jetstream.LimitsPolicy,
 	})
 	if err != nil {
 		nc.Close()
@@ -79,7 +69,7 @@ func NewConsumer(natsURL string, handler MessageHandler) (*Consumer, error) {
 	return &Consumer{nc: nc, js: js, handler: handler}, nil
 }
 
-// Run starts consuming messages and blocks until ctx is cancelled.
+// Run starts consuming webapp.submitted messages and blocks until ctx is cancelled.
 func (c *Consumer) Run(ctx context.Context) error {
 	consumer, err := c.js.CreateOrUpdateConsumer(ctx, streamName, jetstream.ConsumerConfig{
 		Durable:       consumerName,
@@ -93,76 +83,25 @@ func (c *Consumer) Run(ctx context.Context) error {
 		return fmt.Errorf("create submitted consumer: %w", err)
 	}
 
-	failConsumer, err := c.js.CreateOrUpdateConsumer(ctx, streamName, jetstream.ConsumerConfig{
-		Durable:       consumerName + "-failed",
-		FilterSubject: SubjectFailed,
-		MaxDeliver:    maxDeliver,
-		AckPolicy:     jetstream.AckExplicitPolicy,
-		DeliverPolicy: jetstream.DeliverAllPolicy,
-		AckWait:       1 * time.Minute,
-	})
-	if err != nil {
-		return fmt.Errorf("create failed consumer: %w", err)
-	}
-
 	msgs, err := consumer.Messages()
 	if err != nil {
 		return fmt.Errorf("get messages iterator: %w", err)
 	}
 	defer msgs.Stop()
 
-	failMsgs, err := failConsumer.Messages()
-	if err != nil {
-		return fmt.Errorf("get failed messages iterator: %w", err)
-	}
-	defer failMsgs.Stop()
-
-	type envelope struct {
-		msg     jetstream.Msg
-		subject string
-	}
-	ch := make(chan envelope, 64)
-
-	go func() {
-		for {
-			msg, err := msgs.Next()
-			if err != nil {
-				if ctx.Err() != nil {
-					return
-				}
-				log.Printf("consumer: error reading submitted message: %v", err)
-				continue
-			}
-			ch <- envelope{msg: msg, subject: SubjectSubmitted}
-		}
-	}()
-
-	go func() {
-		for {
-			msg, err := failMsgs.Next()
-			if err != nil {
-				if ctx.Err() != nil {
-					return
-				}
-				log.Printf("consumer: error reading failed message: %v", err)
-				continue
-			}
-			ch <- envelope{msg: msg, subject: SubjectFailed}
-		}
-	}()
-
 	for {
-		select {
-		case <-ctx.Done():
+		if ctx.Err() != nil {
 			return ctx.Err()
-		case env := <-ch:
-			switch env.subject {
-			case SubjectSubmitted:
-				c.handleSubmitted(ctx, env.msg)
-			case SubjectFailed:
-				c.handleFailed(ctx, env.msg)
-			}
 		}
+		msg, err := msgs.Next()
+		if err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			log.Printf("consumer: error reading message: %v", err)
+			continue
+		}
+		c.handleSubmitted(ctx, msg)
 	}
 }
 
@@ -175,21 +114,6 @@ func (c *Consumer) handleSubmitted(ctx context.Context, msg jetstream.Msg) {
 	}
 	if err := c.handler.HandleSubmitted(ctx, &m); err != nil {
 		log.Printf("consumer: HandleSubmitted error for job %s: %v", m.JobID, err)
-		_ = msg.Nak()
-		return
-	}
-	_ = msg.Ack()
-}
-
-func (c *Consumer) handleFailed(ctx context.Context, msg jetstream.Msg) {
-	var m FailedMessage
-	if err := json.Unmarshal(msg.Data(), &m); err != nil {
-		log.Printf("consumer: failed to unmarshal FailedMessage: %v", err)
-		_ = msg.Ack()
-		return
-	}
-	if err := c.handler.HandleIngestionFailed(ctx, &m); err != nil {
-		log.Printf("consumer: HandleIngestionFailed error for job %s: %v", m.JobID, err)
 		_ = msg.Nak()
 		return
 	}
