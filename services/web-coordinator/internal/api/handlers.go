@@ -26,6 +26,7 @@ type Storer interface {
 	ListJobs(ctx context.Context, limit, offset int) ([]store.WebJob, error)
 	CountJobs(ctx context.Context) (int, error)
 	ListFindings(ctx context.Context, jobID uuid.UUID) ([]store.WebFinding, error)
+	InsertFinding(ctx context.Context, f store.WebFinding) error
 	TriageFinding(ctx context.Context, findingID, jobID uuid.UUID, status string) error
 	ListFindingsSummaries(ctx context.Context, jobIDs []uuid.UUID) (map[uuid.UUID]store.FindingsSummary, error)
 	Ping(ctx context.Context) error
@@ -82,6 +83,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /jobs", h.SubmitJobHandler)
 	mux.HandleFunc("GET /jobs/{id}", h.GetJobHandler)
 	mux.HandleFunc("GET /jobs/{id}/findings", h.ListFindingsHandler)
+	mux.HandleFunc("POST /jobs/{id}/findings", h.IngestFindingHandler)
 	mux.HandleFunc("PATCH /jobs/{id}/findings/{findingId}", h.TriageHandler)
 	mux.HandleFunc("GET /jobs/{id}/artifacts/{tool}", h.ArtifactHandler)
 	mux.HandleFunc("GET /jobs/{id}/logs", h.LogsHandler)
@@ -270,9 +272,9 @@ func (h *Handler) SubmitJobHandler(w http.ResponseWriter, r *http.Request) {
 		req.ScanProfile = "passive"
 	}
 	switch req.ScanProfile {
-	case "passive", "active", "full":
+	case "passive", "active", "full", "manual":
 	default:
-		writeError(w, http.StatusBadRequest, "scan_profile must be one of: passive, active, full")
+		writeError(w, http.StatusBadRequest, "scan_profile must be one of: passive, active, full, manual")
 		return
 	}
 
@@ -669,6 +671,98 @@ func (h *Handler) ReparseHandler(w http.ResponseWriter, r *http.Request) {
 		ZAPFindings:    zapN,
 		NucleiFindings: nucleiN,
 	})
+}
+
+// IngestFindingHandler handles POST /jobs/{id}/findings.
+// Accepts a skill-originated finding and stores it alongside automated findings.
+//
+// @Summary      Ingest a skill finding
+// @Description  Stores a manually-discovered finding (from the zap-pentest skill) against an existing job. tool must be one of: zap, nuclei, manual.
+// @Tags         jobs
+// @Accept       json
+// @Produce      json
+// @Param        id    path  string  true  "Job UUID"
+// @Param        body  body  object  true  "Finding"
+// @Success      201  {object}  api.FindingResponse
+// @Failure      400  {object}  map[string]string
+// @Failure      404  {object}  map[string]string
+// @Router       /jobs/{id}/findings [post]
+func (h *Handler) IngestFindingHandler(w http.ResponseWriter, r *http.Request) {
+	jobID, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid job ID")
+		return
+	}
+	if _, err := h.store.GetJob(r.Context(), jobID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "job not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "getting job: "+err.Error())
+		return
+	}
+
+	var req struct {
+		Tool        string          `json:"tool"`
+		Severity    string          `json:"severity"`
+		Title       string          `json:"title"`
+		URL         string          `json:"url"`
+		Description string          `json:"description,omitempty"`
+		Evidence    string          `json:"evidence,omitempty"`
+		CWE         *int            `json:"cwe,omitempty"`
+		TemplateID  string          `json:"template_id,omitempty"`
+		Details     json.RawMessage `json:"details,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+	switch req.Tool {
+	case "zap", "nuclei", "manual":
+	default:
+		writeError(w, http.StatusBadRequest, "tool must be one of: zap, nuclei, manual")
+		return
+	}
+	switch req.Severity {
+	case "info", "low", "medium", "high", "critical":
+	default:
+		writeError(w, http.StatusBadRequest, "severity must be one of: info, low, medium, high, critical")
+		return
+	}
+	if strings.TrimSpace(req.Title) == "" {
+		writeError(w, http.StatusBadRequest, "title is required")
+		return
+	}
+	if req.URL == "" {
+		writeError(w, http.StatusBadRequest, "url is required")
+		return
+	}
+
+	f := store.WebFinding{
+		ID:       uuid.New(),
+		JobID:    jobID,
+		Tool:     req.Tool,
+		Severity: req.Severity,
+		Title:    strings.TrimSpace(req.Title),
+		URL:      req.URL,
+		Details:  req.Details,
+	}
+	if req.Description != "" {
+		f.Description = &req.Description
+	}
+	if req.Evidence != "" {
+		f.Evidence = &req.Evidence
+	}
+	f.CWE = req.CWE
+	if req.TemplateID != "" {
+		f.TemplateID = &req.TemplateID
+	}
+
+	if err := h.store.InsertFinding(r.Context(), f); err != nil {
+		writeError(w, http.StatusInternalServerError, "inserting finding: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, findingToResponse(&f))
 }
 
 // RetriggerHandler handles POST /jobs/{id}/retrigger.

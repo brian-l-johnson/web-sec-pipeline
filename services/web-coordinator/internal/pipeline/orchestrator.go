@@ -119,6 +119,19 @@ func (o *Orchestrator) HandleSubmitted(ctx context.Context, msg *queue.Submitted
 		})
 	})
 
+	// Manual engagements are created by the skill — no k8s jobs are launched.
+	// All tool statuses are set to complete immediately so the job is not swept
+	// as stale and findings can be attached directly via the API.
+	if msg.ScanProfile == "manual" {
+		for _, tool := range []string{"crawl", "zap", "nuclei"} {
+			if err := o.store.UpdateJobToolStatus(ctx, jobID, tool, "complete"); err != nil {
+				log.Printf("orchestrator: set %s complete (manual job=%s): %v", tool, jobID, err)
+			}
+		}
+		log.Printf("orchestrator: manual engagement %s registered (target=%s)", jobID, msg.TargetURL)
+		return nil
+	}
+
 	if err := o.manager.CreateCrawlJob(ctx, jobID, msg.TargetURL, msg.Scope, msg.AuthConfig); err != nil {
 		_ = o.store.SetJobError(ctx, jobID, fmt.Sprintf("create crawl job: %v", err))
 		return fmt.Errorf("create crawl job: %w", err)

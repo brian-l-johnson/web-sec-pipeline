@@ -77,6 +77,14 @@ func (m *mockStore) ListFindings(_ context.Context, jobID uuid.UUID) ([]store.We
 	return m.findings[jobID], nil
 }
 
+func (m *mockStore) InsertFinding(_ context.Context, f store.WebFinding) error {
+	if m.err != nil {
+		return m.err
+	}
+	m.findings[f.JobID] = append(m.findings[f.JobID], f)
+	return nil
+}
+
 func (m *mockStore) TriageFinding(_ context.Context, _, _ uuid.UUID, _ string) error {
 	return m.err
 }

@@ -464,9 +464,9 @@ func validateTargetFields(name, targetURL, profile string) error {
 		return fmt.Errorf("target_url must be a valid http/https URL")
 	}
 	switch profile {
-	case "", "passive", "active", "full":
+	case "", "passive", "active", "full", "manual":
 	default:
-		return fmt.Errorf("scan_profile must be one of: passive, active, full")
+		return fmt.Errorf("scan_profile must be one of: passive, active, full, manual")
 	}
 	return nil
 }

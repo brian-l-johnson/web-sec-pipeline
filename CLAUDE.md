@@ -21,7 +21,8 @@ Multi-module Go repository for web application security analysis. Two services u
 Tool wrapper images live under `images/`:
 
 - `images/web-crawler/` — Playwright + mitmproxy; captures authenticated browser session as HAR
-- `images/zap-runner/` — OWASP ZAP automation framework runner
+- `images/zap-runner/` — OWASP ZAP automation framework runner (one-shot batch mode)
+- `images/zap-proxy/` — OWASP ZAP in persistent proxy/daemon mode with REST API (used by the zap-pentest skill)
 - `images/nuclei-runner/` — Nuclei template-based scanner
 
 Each service has its own `go.mod`. There is no top-level Go module.
@@ -129,3 +130,47 @@ Kubernetes manifests and Flux Kustomizations are managed in a separate repo:
 ```
 
 Do not commit Kubernetes YAML to this repo.
+
+---
+
+## ZAP Pentest Skill
+
+An interactive security investigation skill lives at `.claude/skills/zap-pentest/`.
+It is a **parallel tool** to the automated pipeline — meant for hands-on investigation
+sessions, not scheduled batch scans.
+
+### Relationship to the automated pipeline
+
+| Automated pipeline | ZAP pentest skill |
+|---|---|
+| Triggered by HTTP POST → NATS | Invoked interactively by Claude |
+| ZAP runs as a one-shot k8s Job | ZAP runs as a persistent proxy (`zap-proxy` image) |
+| Findings stored in `web_findings` DB table | Findings stored in `~/engagements/<name>/findings/` |
+| Results visible in coordinator UI | Findings optionally pushed to coordinator via `POST /jobs/{id}/findings` |
+
+### Coordinator integration points
+
+- `GET /targets` — skill reads target config from here to seed engagement.yaml
+- `POST /jobs` with `scan_profile: manual` — creates a manual engagement job (no k8s jobs launched)
+- `POST /jobs/{id}/findings` — skill pushes discoveries here so they appear in the UI
+
+### Engagement directories
+
+Engagements live **outside the repo** at `~/engagements/<name>/`. Set
+`ENGAGEMENTS_ROOT` env var to override. Each engagement needs an
+`engagement.yaml` (copy from `.claude/skills/zap-pentest/engagement.template.yaml`).
+
+### ZAP proxy image
+
+```bash
+docker build -f images/zap-proxy/Dockerfile -t zap-proxy:dev images/zap-proxy/
+docker run -p 8080:8080 -p 8090:8090 \
+  -e ZAP_API_KEY=changeme \
+  zap-proxy:dev
+```
+
+Proxy port: 8080. REST API port: 8090.
+
+### Running the skill
+
+See `.claude/skills/zap-pentest/SKILL.md` for the full workflow.
